@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/raft"
+	"github.com/neilotoole/slogt"
 	_ "modernc.org/sqlite"
 )
 
@@ -25,6 +26,7 @@ func testFSM(t *testing.T) *fsm {
 		db:      db,
 		watches: newWatchHub(),
 		kinds:   make(map[string]kindInfo),
+		logger:  slogt.New(t),
 	}
 	f := (*fsm)(app)
 	if err := f.initTable(); err != nil {

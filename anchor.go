@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +42,10 @@ type Config struct {
 	// JoinAddr is the HTTP address of an existing node to join.
 	// Mutually exclusive with Bootstrap.
 	JoinAddr string
+
+	// Logger is the structured logger for the App. If nil, [slog.Default] is
+	// used.
+	Logger *slog.Logger
 }
 
 // App is the central coordinator. It wires together Raft, the FSM, the HTTP
@@ -60,7 +64,7 @@ type App struct {
 	logStore   *raftsqlite.SQLiteStore
 	snapStore  *raftsqlite.SnapshotStore
 
-	logger *log.Logger
+	logger *slog.Logger
 }
 
 // New creates a new App with the given configuration.
@@ -71,11 +75,15 @@ func New(config Config) *App {
 	if config.HTTPAddr == "" {
 		config.HTTPAddr = ":11000"
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &App{
 		config:  config,
 		watches: newWatchHub(),
 		kinds:   make(map[string]kindInfo),
-		logger:  log.New(os.Stderr, "[anchor] ", log.LstdFlags),
+		logger:  logger,
 	}
 }
 
@@ -107,7 +115,11 @@ func (a *App) HTTPAddrForTest() string {
 func (a *App) Start(ctx context.Context) error {
 	// 1. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {
-		if err := m.Init(ctx, a); err != nil {
+		ic := InitContext{
+			App:    a,
+			Logger: a.logger.With("module", m.Name()),
+		}
+		if err := m.Init(ctx, ic); err != nil {
 			return fmt.Errorf("module %s init: %w", m.Name(), err)
 		}
 	}
@@ -203,7 +215,9 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	// 7. Start HTTP server.
-	a.startHTTP()
+	if err := a.startHTTP(); err != nil {
+		return fmt.Errorf("start HTTP: %w", err)
+	}
 
 	// 8. If joining, send join request to existing node.
 	if a.config.JoinAddr != "" {
@@ -218,7 +232,7 @@ func (a *App) Start(ctx context.Context) error {
 		go a.storeNodeMeta(ctx)
 	}
 
-	a.logger.Printf("started node %s, raft=%s http=%s", a.config.NodeID, a.config.ListenAddr, a.config.HTTPAddr)
+	a.logger.Info("started node", "node_id", a.config.NodeID, "raft_addr", a.config.ListenAddr, "http_addr", a.config.HTTPAddr)
 	return nil
 }
 
@@ -238,7 +252,7 @@ func (a *App) storeNodeMeta(ctx context.Context) {
 	meta := nodeMetaValue{HTTPAddr: a.httpAddr}
 	data, err := json.Marshal(meta)
 	if err != nil {
-		a.logger.Printf("failed to marshal node meta: %v", err)
+		a.logger.Error("failed to marshal node meta", "err", err)
 		return
 	}
 	cmd := Command{
@@ -248,7 +262,7 @@ func (a *App) storeNodeMeta(ctx context.Context) {
 		Value: data,
 	}
 	if err := a.applyCommand(cmd); err != nil {
-		a.logger.Printf("failed to store node meta: %v", err)
+		a.logger.Error("failed to store node meta", "err", err)
 	}
 }
 

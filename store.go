@@ -21,8 +21,8 @@ type Kinded interface {
 // kindInfo holds the metadata for a registered kind, used by the HTTP layer
 // for validation.
 type kindInfo struct {
-	typeKey string         // full Go type path, for error messages
-	newFn   func() any     // returns a pointer to a new zero value of the type
+	typeKey string     // full Go type path, for error messages
+	newFn   func() any // returns a pointer to a new zero value of the type
 }
 
 // Register registers a new configuration kind with the app and returns a

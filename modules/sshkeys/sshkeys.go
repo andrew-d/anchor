@@ -16,7 +16,7 @@ package sshkeys
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -51,13 +51,15 @@ type Module struct {
 	// nowFn returns the current time. If nil, defaults to time.Now.
 	nowFn func() time.Time
 
-	store *anchor.TypedStore[Config]
+	logger *slog.Logger
+	store  *anchor.TypedStore[Config]
 }
 
 func (m *Module) Name() string { return "ssh_authorized_keys" }
 
-func (m *Module) Init(ctx context.Context, app *anchor.App) error {
-	m.store = anchor.Register[Config](app)
+func (m *Module) Init(ctx context.Context, ic anchor.InitContext) error {
+	m.logger = ic.Logger
+	m.store = anchor.Register[Config](ic.App)
 
 	go m.watchLoop(ctx, m.store)
 	return nil
@@ -102,7 +104,7 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 				return
 			}
 			if e.Err != nil {
-				log.Printf("[ssh_keys] error deserializing event for %q: %v", e.Key, e.Err)
+				m.logger.Error("error deserializing event", "key", e.Key, "err", e.Err)
 				continue
 			}
 
@@ -110,12 +112,12 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 			switch e.Change {
 			case anchor.ChangeSet:
 				if err := m.writeAuthorizedKeys(username, e.Value.Keys); err != nil {
-					log.Printf("[ssh_keys] failed to write authorized_keys for %q: %v", username, err)
+					m.logger.Error("failed to write authorized_keys", "username", username, "err", err)
 				} else {
-					log.Printf("[ssh_keys] updated authorized_keys for %q (%d keys)", username, len(e.Value.Keys))
+					m.logger.Info("updated authorized_keys", "username", username, "num_keys", len(e.Value.Keys))
 				}
 			case anchor.ChangeDelete:
-				log.Printf("[ssh_keys] refusing to remove all keys for %q (delete event); to remove keys, set an explicit list instead", username)
+				m.logger.Warn("refusing to remove all keys (delete event); to remove keys, set an explicit list instead", "username", username)
 			}
 		}
 	}

@@ -6,11 +6,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/hashicorp/raft"
 )
 
-func (a *App) startHTTP() {
+func (a *App) startHTTP() error {
 	mux := http.NewServeMux()
 
 	// CRUD for configuration kinds.
@@ -27,15 +28,17 @@ func (a *App) startHTTP() {
 
 	ln, err := net.Listen("tcp", a.config.HTTPAddr)
 	if err != nil {
-		a.logger.Fatalf("failed to listen on %s: %v", a.config.HTTPAddr, err)
+		return fmt.Errorf("failed to listen on %s: %w", a.config.HTTPAddr, err)
 	}
 	a.httpAddr = ln.Addr().String()
 
 	go func() {
 		if err := a.httpServer.Serve(ln); err != http.ErrServerClosed {
-			a.logger.Fatalf("HTTP server error: %v", err)
+			a.logger.Error("HTTP server error", "err", err)
+			os.Exit(1)
 		}
 	}()
+	return nil
 }
 
 // redirectToLeader sends a 307 Temporary Redirect to the leader's HTTP address.
@@ -218,7 +221,7 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 		if srv.ID == raft.ServerID(req.NodeID) || srv.Address == raft.ServerAddress(req.RaftAddr) {
 			if srv.ID == raft.ServerID(req.NodeID) && srv.Address == raft.ServerAddress(req.RaftAddr) {
 				// Already a member with matching ID and address.
-				a.logger.Printf("node %s at %s already member, ignoring join", req.NodeID, req.RaftAddr)
+				a.logger.Info("node already member, ignoring join", "node_id", req.NodeID, "raft_addr", req.RaftAddr)
 				w.WriteHeader(http.StatusOK)
 				return
 			}
@@ -237,6 +240,6 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.logger.Printf("node %s at %s joined successfully", req.NodeID, req.RaftAddr)
+	a.logger.Info("node joined successfully", "node_id", req.NodeID, "raft_addr", req.RaftAddr)
 	w.WriteHeader(http.StatusOK)
 }

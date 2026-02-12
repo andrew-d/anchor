@@ -7,7 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -83,14 +83,16 @@ func cmdServe(args []string) {
 	defer cancel()
 
 	if err := app.Start(ctx); err != nil {
-		log.Fatalf("failed to start: %v", err)
+		slog.Error("failed to start", "err", err)
+		os.Exit(1)
 	}
 
 	<-ctx.Done()
-	log.Println("shutting down...")
+	slog.Info("shutting down")
 
 	if err := app.Shutdown(context.Background()); err != nil {
-		log.Fatalf("shutdown error: %v", err)
+		slog.Error("shutdown error", "err", err)
+		os.Exit(1)
 	}
 }
 
@@ -109,7 +111,8 @@ func cmdGet(args []string) {
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key))
 	if err != nil {
-		log.Fatalf("request failed: %v", err)
+		slog.Error("request failed", "err", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
@@ -138,10 +141,12 @@ func cmdSet(args []string) {
 
 	body, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		log.Fatalf("failed to read stdin: %v", err)
+		slog.Error("failed to read stdin", "err", err)
+		os.Exit(1)
 	}
 	if !json.Valid(body) {
-		log.Fatal("stdin does not contain valid JSON")
+		slog.Error("stdin does not contain valid JSON")
+		os.Exit(1)
 	}
 
 	req, err := http.NewRequest(http.MethodPut,
@@ -149,13 +154,15 @@ func cmdSet(args []string) {
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		log.Fatalf("failed to create request: %v", err)
+		slog.Error("failed to create request", "err", err)
+		os.Exit(1)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Fatalf("request failed: %v", err)
+		slog.Error("request failed", "err", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
@@ -184,12 +191,14 @@ func cmdDelete(args []string) {
 		nil,
 	)
 	if err != nil {
-		log.Fatalf("failed to create request: %v", err)
+		slog.Error("failed to create request", "err", err)
+		os.Exit(1)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Fatalf("request failed: %v", err)
+		slog.Error("request failed", "err", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
@@ -214,7 +223,8 @@ func cmdList(args []string) {
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/%s", *server, kind))
 	if err != nil {
-		log.Fatalf("request failed: %v", err)
+		slog.Error("request failed", "err", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 

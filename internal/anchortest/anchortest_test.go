@@ -20,8 +20,8 @@ type testValue struct {
 func (testValue) Kind() string { return "anchortest.testValue" }
 
 func (m *testModule) Name() string { return "test" }
-func (m *testModule) Init(_ context.Context, app *anchor.App) error {
-	m.store = anchor.Register[testValue](app)
+func (m *testModule) Init(_ context.Context, ic anchor.InitContext) error {
+	m.store = anchor.Register[testValue](ic.App)
 	return nil
 }
 

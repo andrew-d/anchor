@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/andrew-d/anchor"
+	"github.com/neilotoole/slogt"
 )
 
 // Cluster is a running test cluster of anchor nodes.
@@ -35,6 +36,8 @@ func New(t *testing.T, numNodes int, modsFn func(nodeIndex int) []anchor.Module)
 
 	apps := make([]*anchor.App, numNodes)
 
+	logger := slogt.New(t)
+
 	// Bootstrap node 0.
 	apps[0] = anchor.New(anchor.Config{
 		DataDir:    t.TempDir(),
@@ -42,6 +45,7 @@ func New(t *testing.T, numNodes int, modsFn func(nodeIndex int) []anchor.Module)
 		HTTPAddr:   "127.0.0.1:0",
 		NodeID:     "node-0",
 		Bootstrap:  true,
+		Logger:     logger,
 	})
 	if modsFn != nil {
 		for _, m := range modsFn(0) {
@@ -66,6 +70,7 @@ func New(t *testing.T, numNodes int, modsFn func(nodeIndex int) []anchor.Module)
 			HTTPAddr:   "127.0.0.1:0",
 			NodeID:     fmt.Sprintf("node-%d", i),
 			JoinAddr:   joinAddr,
+			Logger:     logger,
 		})
 		if modsFn != nil {
 			for _, m := range modsFn(i) {

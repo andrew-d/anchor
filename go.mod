@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/andrew-d/raft-sqlite v0.0.0
 	github.com/hashicorp/raft v1.7.3
+	github.com/neilotoole/slogt v1.1.0
 	modernc.org/sqlite v1.45.0
 )
 
