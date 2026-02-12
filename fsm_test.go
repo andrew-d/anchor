@@ -5,16 +5,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/hashicorp/raft"
 	_ "modernc.org/sqlite"
 )
 
-// testFSM creates an in-memory SQLite-backed FSM for testing.
+// testFSM creates a SQLite-backed FSM for testing.
 func testFSM(t *testing.T) *fsm {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
