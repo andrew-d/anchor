@@ -84,6 +84,16 @@ func (a *App) RegisterModule(m Module) {
 	a.modules = append(a.modules, m)
 }
 
+// IsLeaderForTest returns true if this node is the current Raft
+// leader.
+//
+// Note that the cluster state can change immediately after this
+// function returns, making it unsafe to use in production. This
+// should only be used in tests.
+func (a *App) IsLeaderForTest() bool {
+	return a.raft.State() == raft.Leader
+}
+
 // Start initializes and starts the App. It blocks until the context is
 // canceled or an error occurs during startup.
 func (a *App) Start(ctx context.Context) error {

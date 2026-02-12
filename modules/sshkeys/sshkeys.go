@@ -44,21 +44,22 @@ type userInfo struct {
 
 // Module manages authorized_keys files based on replicated configuration.
 type Module struct {
-	// lookupUser resolves a username to user info (home directory, uid, gid).
-	// If nil, defaults to os/user.Lookup. Exported for testing only via the
-	// unexported userInfo type.
+	// lookupUserFn resolves a username to user info (home directory, uid, gid).
+	// If nil, defaults to os/user.Lookup.
 	lookupUserFn func(username string) (userInfo, error)
 
 	// nowFn returns the current time. If nil, defaults to time.Now.
 	nowFn func() time.Time
+
+	store *anchor.TypedStore[Config]
 }
 
 func (m *Module) Name() string { return "ssh_authorized_keys" }
 
 func (m *Module) Init(ctx context.Context, app *anchor.App) error {
-	store := anchor.Register[Config](app, kind)
+	m.store = anchor.Register[Config](app, kind)
 
-	go m.watchLoop(ctx, store)
+	go m.watchLoop(ctx, m.store)
 	return nil
 }
 
