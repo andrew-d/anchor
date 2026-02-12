@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/andrew-d/anchor/internal/hclogslog"
 	raftsqlite "github.com/andrew-d/raft-sqlite"
 	"github.com/hashicorp/raft"
 	_ "modernc.org/sqlite"
@@ -179,7 +180,8 @@ func (a *App) Start(ctx context.Context) error {
 	// 4. Create TCP transport. Pass nil for the advertise address so the
 	// transport uses the listener's actual bound address (important when
 	// ListenAddr uses port 0).
-	transport, err := raft.NewTCPTransport(a.config.ListenAddr, nil, 3, 10*time.Second, os.Stderr)
+	raftLogger := hclogslog.New(a.logger.With("component", "raft"))
+	transport, err := raft.NewTCPTransportWithLogger(a.config.ListenAddr, nil, 3, 10*time.Second, raftLogger)
 	if err != nil {
 		return fmt.Errorf("create transport: %w", err)
 	}
@@ -188,6 +190,7 @@ func (a *App) Start(ctx context.Context) error {
 	// 5. Create Raft instance.
 	raftConfig := raft.DefaultConfig()
 	raftConfig.LocalID = raft.ServerID(a.config.NodeID)
+	raftConfig.Logger = raftLogger
 
 	ra, err := raft.NewRaft(raftConfig, f, logStore, logStore, snapStore, transport)
 	if err != nil {
