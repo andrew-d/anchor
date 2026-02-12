@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/andrew-d/anchor/internal/hclogslog"
@@ -66,6 +67,15 @@ type App struct {
 	snapStore  *raftsqlite.SnapshotStore
 
 	logger *slog.Logger
+
+	// ctx is a context derived from the one passed to Start. It is canceled
+	// during Shutdown to signal module goroutines to stop.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// wg tracks goroutines started via InitContext.Go so that Shutdown can
+	// wait for them to finish.
+	wg sync.WaitGroup
 }
 
 // New creates a new App with the given configuration.
@@ -114,13 +124,15 @@ func (a *App) HTTPAddrForTest() string {
 // Start initializes and starts the App. It blocks until the context is
 // canceled or an error occurs during startup.
 func (a *App) Start(ctx context.Context) error {
+	a.ctx, a.cancel = context.WithCancel(ctx)
+
 	// 1. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {
 		ic := InitContext{
 			App:    a,
 			Logger: a.logger.With("module", m.Name()),
 		}
-		if err := m.Init(ctx, ic); err != nil {
+		if err := m.Init(a.ctx, ic); err != nil {
 			return fmt.Errorf("module %s init: %w", m.Name(), err)
 		}
 	}
@@ -232,7 +244,7 @@ func (a *App) Start(ctx context.Context) error {
 	// 9. Store node metadata (Raft addr -> HTTP addr mapping).
 	if a.config.Bootstrap {
 		// Wait for leadership before writing metadata.
-		go a.storeNodeMeta(ctx)
+		a.wg.Go(func() { a.storeNodeMeta(a.ctx) })
 	}
 
 	a.logger.Info("started node", "node_id", a.config.NodeID, "raft_addr", a.config.ListenAddr, "http_addr", a.config.HTTPAddr)
@@ -296,6 +308,12 @@ func (a *App) joinCluster() error {
 
 // Shutdown gracefully stops the App.
 func (a *App) Shutdown(ctx context.Context) error {
+	// Signal all module goroutines to stop, then wait for them.
+	if a.cancel != nil {
+		a.cancel()
+	}
+	a.wg.Wait()
+
 	var firstErr error
 	saveErr := func(err error) {
 		if err != nil && firstErr == nil {

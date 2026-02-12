@@ -2,6 +2,7 @@ package anchor
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -38,6 +39,57 @@ func testApp(t *testing.T) *App {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("node did not become leader in time")
+	return nil
+}
+
+func TestShutdown_WaitsForModuleGoroutines(t *testing.T) {
+	mod := &shutdownTestModule{}
+
+	app := New(Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "test-node",
+		Bootstrap:  true,
+	})
+	app.RegisterModule(mod)
+
+	if err := app.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for leadership.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.raft.State().String() == "Leader" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err := app.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// After Shutdown returns, all module goroutines should have exited.
+	if !mod.exited.Load() {
+		t.Fatal("module goroutine was still running after Shutdown returned")
+	}
+}
+
+// shutdownTestModule is a test module whose goroutine sets exited=true when
+// the context passed to Init is canceled.
+type shutdownTestModule struct {
+	exited atomic.Bool
+}
+
+func (m *shutdownTestModule) Name() string { return "shutdown-test" }
+
+func (m *shutdownTestModule) Init(_ context.Context, ic InitContext) error {
+	ic.Go(func(ctx context.Context) {
+		<-ctx.Done()
+		m.exited.Store(true)
+	})
 	return nil
 }
 

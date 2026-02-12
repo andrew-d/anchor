@@ -57,11 +57,13 @@ type Module struct {
 
 func (m *Module) Name() string { return "ssh_authorized_keys" }
 
-func (m *Module) Init(ctx context.Context, ic anchor.InitContext) error {
+func (m *Module) Init(_ context.Context, ic anchor.InitContext) error {
 	m.logger = ic.Logger
 	m.store = anchor.Register[Config](ic.App)
 
-	go m.watchLoop(ctx, m.store)
+	ic.Go(func(ctx context.Context) {
+		m.watchLoop(ctx, m.store)
+	})
 	return nil
 }
 
