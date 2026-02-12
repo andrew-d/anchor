@@ -29,6 +29,7 @@ func (a *App) startHTTP() {
 	if err != nil {
 		a.logger.Fatalf("failed to listen on %s: %v", a.config.HTTPAddr, err)
 	}
+	a.httpAddr = ln.Addr().String()
 
 	go func() {
 		if err := a.httpServer.Serve(ln); err != http.ErrServerClosed {

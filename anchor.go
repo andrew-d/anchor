@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,6 +55,7 @@ type App struct {
 	modules []Module
 
 	httpServer *http.Server
+	httpAddr   string // actual bound address from listener
 	transport  *raft.NetworkTransport
 	logStore   *raftsqlite.SQLiteStore
 	snapStore  *raftsqlite.SnapshotStore
@@ -92,6 +92,14 @@ func (a *App) RegisterModule(m Module) {
 // should only be used in tests.
 func (a *App) IsLeaderForTest() bool {
 	return a.raft.State() == raft.Leader
+}
+
+// HTTPAddrForTest returns the actual bound HTTP address. This may differ
+// from Config.HTTPAddr when using port 0.
+//
+// This should only be used in tests.
+func (a *App) HTTPAddrForTest() string {
+	return a.httpAddr
 }
 
 // Start initializes and starts the App. It blocks until the context is
@@ -156,12 +164,10 @@ func (a *App) Start(ctx context.Context) error {
 		return fmt.Errorf("create fsm table: %w", err)
 	}
 
-	// 4. Create TCP transport.
-	addr, err := net.ResolveTCPAddr("tcp", a.config.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("resolve tcp addr: %w", err)
-	}
-	transport, err := raft.NewTCPTransport(a.config.ListenAddr, addr, 3, 10*time.Second, os.Stderr)
+	// 4. Create TCP transport. Pass nil for the advertise address so the
+	// transport uses the listener's actual bound address (important when
+	// ListenAddr uses port 0).
+	transport, err := raft.NewTCPTransport(a.config.ListenAddr, nil, 3, 10*time.Second, os.Stderr)
 	if err != nil {
 		return fmt.Errorf("create transport: %w", err)
 	}
@@ -229,7 +235,7 @@ func (a *App) storeNodeMeta(ctx context.Context) {
 		}
 	}
 
-	meta := nodeMetaValue{HTTPAddr: a.config.HTTPAddr}
+	meta := nodeMetaValue{HTTPAddr: a.httpAddr}
 	data, err := json.Marshal(meta)
 	if err != nil {
 		a.logger.Printf("failed to marshal node meta: %v", err)

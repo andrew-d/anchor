@@ -1,7 +1,6 @@
 package sshkeys
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,19 +8,8 @@ import (
 	"time"
 
 	"github.com/andrew-d/anchor"
+	"github.com/andrew-d/anchor/internal/anchortest"
 )
-
-func waitForLeader(t *testing.T, app *anchor.App, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if app.IsLeaderForTest() {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("node did not become leader within timeout")
-}
 
 func TestIntegration_SSHKeysWrittenToDisk(t *testing.T) {
 	homeBase := t.TempDir()
@@ -34,39 +22,21 @@ func TestIntegration_SSHKeysWrittenToDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mod := &Module{
-		lookupUserFn: func(username string) (userInfo, error) {
-			return userInfo{
-				homeDir: filepath.Join(homeBase, username),
-				uid:     uid,
-				gid:     gid,
-			}, nil
-		},
-	}
-
-	app := anchor.New(anchor.Config{
-		DataDir:    t.TempDir(),
-		ListenAddr: "127.0.0.1:0",
-		HTTPAddr:   "127.0.0.1:0",
-		NodeID:     "test-node",
-		Bootstrap:  true,
-	})
-	app.RegisterModule(mod)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := app.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cancel()
-		app.Shutdown(context.Background())
+	mods := make([]*Module, 3)
+	cluster := anchortest.New(t, 3, func(i int) []anchor.Module {
+		mods[i] = &Module{
+			lookupUserFn: func(username string) (userInfo, error) {
+				return userInfo{
+					homeDir: filepath.Join(homeBase, username),
+					uid:     uid,
+					gid:     gid,
+				}, nil
+			},
+		}
+		return []anchor.Module{mods[i]}
 	})
 
-	// Wait for this node to become leader, then write keys via the module's store.
-	waitForLeader(t, app, 10*time.Second)
-	store := mod.store
+	store := mods[cluster.LeaderIndex()].store
 
 	if err := store.Set("alice", Config{
 		Keys: []string{
