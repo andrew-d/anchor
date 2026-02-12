@@ -5,25 +5,52 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/andrew-d/anchor/internal/typekey"
 	"github.com/hashicorp/raft"
 )
 
 const raftTimeout = 10 * time.Second
 
+// Kinded is the interface that registered configuration types must implement.
+// Kind returns a short, HTTP-safe name (e.g. "sshkeys.Config") used as the
+// storage key in the database, commands, events, and HTTP URLs.
+type Kinded interface {
+	Kind() string
+}
+
 // kindInfo holds the metadata for a registered kind, used by the HTTP layer
 // for validation.
 type kindInfo struct {
-	name  string
-	newFn func() any // returns a pointer to a new zero value of the type
+	typeKey string         // full Go type path, for error messages
+	newFn   func() any     // returns a pointer to a new zero value of the type
 }
 
 // Register registers a new configuration kind with the app and returns a
 // [TypedStore] for type-safe access. It must be called during module Init,
 // before the app starts.
-func Register[T any](app *App, kind string) *TypedStore[T] {
+//
+// The kind string is derived from T's Kind() method. Register panics if the
+// same Go type or the same kind string is registered twice.
+func Register[T Kinded](app *App) *TypedStore[T] {
+	var zero T
+	kind := zero.Kind()
+	tk := typekey.Of[T]()
+
+	// Check for duplicate kind string from a different type.
+	if existing, ok := app.kinds[kind]; ok {
+		panic(fmt.Sprintf("anchor.Register: kind %q already registered by %s (new: %s)", kind, existing.typeKey, tk))
+	}
+
+	// Check for duplicate Go type registered under a different kind.
+	for existingKind, info := range app.kinds {
+		if info.typeKey == tk {
+			panic(fmt.Sprintf("anchor.Register: type %s already registered as kind %q", tk, existingKind))
+		}
+	}
+
 	app.kinds[kind] = kindInfo{
-		name:  kind,
-		newFn: func() any { return new(T) },
+		typeKey: tk,
+		newFn:   func() any { return new(T) },
 	}
 	return &TypedStore[T]{
 		app:  app,
@@ -34,7 +61,7 @@ func Register[T any](app *App, kind string) *TypedStore[T] {
 // TypedStore provides type-safe access to a single configuration kind.
 // Reads go directly to the local FSM state (eventual consistency).
 // Writes are applied through Raft (leader only).
-type TypedStore[T any] struct {
+type TypedStore[T Kinded] struct {
 	app  *App
 	kind string
 }

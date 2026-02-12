@@ -2,7 +2,7 @@
 // files. It watches for changes to SSH key configuration and writes the
 // appropriate authorized_keys file for each configured user.
 //
-// The configuration kind is "ssh_keys" with entries keyed by username:
+// The configuration kind is "sshkeys.Config" with entries keyed by username:
 //
 //	{
 //	  "keys": ["ssh-rsa AAAA...", "ssh-ed25519 AAAA..."]
@@ -28,12 +28,12 @@ import (
 	"github.com/andrew-d/anchor"
 )
 
-const kind = "ssh_keys"
-
 // Config holds SSH key entries for a single user.
 type Config struct {
 	Keys []string `json:"keys"`
 }
+
+func (Config) Kind() string { return "sshkeys.Config" }
 
 // userInfo holds the resolved information about a system user.
 type userInfo struct {
@@ -57,7 +57,7 @@ type Module struct {
 func (m *Module) Name() string { return "ssh_authorized_keys" }
 
 func (m *Module) Init(ctx context.Context, app *anchor.App) error {
-	m.store = anchor.Register[Config](app, kind)
+	m.store = anchor.Register[Config](app)
 
 	go m.watchLoop(ctx, m.store)
 	return nil

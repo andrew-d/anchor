@@ -46,9 +46,11 @@ type testUser struct {
 	Keys []string `json:"keys"`
 }
 
+func (testUser) Kind() string { return "anchor.testUser" }
+
 func TestIntegration_TypedStore_SetGet(t *testing.T) {
 	app := testApp(t)
-	store := Register[testUser](app, "users")
+	store := Register[testUser](app)
 
 	if err := store.Set("alice", testUser{Name: "Alice", Keys: []string{"ssh-rsa AAA"}}); err != nil {
 		t.Fatal(err)
@@ -68,7 +70,7 @@ func TestIntegration_TypedStore_SetGet(t *testing.T) {
 
 func TestIntegration_TypedStore_List(t *testing.T) {
 	app := testApp(t)
-	store := Register[testUser](app, "users")
+	store := Register[testUser](app)
 
 	if err := store.Set("alice", testUser{Name: "Alice"}); err != nil {
 		t.Fatal(err)
@@ -94,7 +96,7 @@ func TestIntegration_TypedStore_List(t *testing.T) {
 
 func TestIntegration_TypedStore_Delete(t *testing.T) {
 	app := testApp(t)
-	store := Register[testUser](app, "users")
+	store := Register[testUser](app)
 
 	if err := store.Set("alice", testUser{Name: "Alice"}); err != nil {
 		t.Fatal(err)
@@ -114,7 +116,7 @@ func TestIntegration_TypedStore_Delete(t *testing.T) {
 
 func TestIntegration_TypedStore_Watch(t *testing.T) {
 	app := testApp(t)
-	store := Register[testUser](app, "users")
+	store := Register[testUser](app)
 
 	w := store.Watch()
 	defer w.Stop()
