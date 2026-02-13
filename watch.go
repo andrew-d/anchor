@@ -22,14 +22,29 @@ type Event struct {
 	Value  json.RawMessage // nil for deletes
 
 	raftIndex uint64
-	ack       chan struct{}
+	ack       *acker
 }
 
 // Ack acknowledges the event, advancing the subscriber's cursor so that the
-// event will not be redelivered.
+// event will not be redelivered. It is safe to call multiple times.
 func (e *Event) Ack() {
-	close(e.ack)
+	e.ack.ack()
 }
+
+// acker is a one-shot acknowledgment signal. It is allocated on the heap and
+// shared by reference so that Event (a value type sent through channels) can
+// be safely copied.
+type acker struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func newAcker() *acker {
+	return &acker{ch: make(chan struct{})}
+}
+
+func (a *acker) ack()              { a.once.Do(func() { close(a.ch) }) }
+func (a *acker) done() <-chan struct{} { return a.ch }
 
 // Watcher receives events for a specific kind. It reads persisted events from
 // SQLite one at a time, delivers each on the output channel, and waits for an
@@ -98,7 +113,7 @@ func (w *Watcher) drain() {
 		if val != "" {
 			e.Value = json.RawMessage(val)
 		}
-		e.ack = make(chan struct{})
+		e.ack = newAcker()
 
 		// Deliver event (blocks until consumer takes it).
 		select {
@@ -110,10 +125,10 @@ func (w *Watcher) drain() {
 		// Wait for ack. If done fires concurrently, still prefer ack so
 		// the cursor advances for events the consumer already processed.
 		select {
-		case <-e.ack:
+		case <-e.ack.done():
 		case <-w.done:
 			select {
-			case <-e.ack:
+			case <-e.ack.done():
 			default:
 				return
 			}
@@ -188,12 +203,12 @@ type TypedEvent[T any] struct {
 	Value  T     // zero value for deletes
 	Err    error // non-nil if JSON deserialization failed
 
-	ack chan struct{}
+	ack *acker
 }
 
-// Ack acknowledges the typed event.
+// Ack acknowledges the typed event. It is safe to call multiple times.
 func (e *TypedEvent[T]) Ack() {
-	close(e.ack)
+	e.ack.ack()
 }
 
 func newTypedWatcher[T any](w *Watcher) *TypedWatcher[T] {
