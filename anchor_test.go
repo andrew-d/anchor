@@ -170,7 +170,7 @@ func TestIntegration_TypedStore_Watch(t *testing.T) {
 	app := testApp(t)
 	store := Register[testUser](app)
 
-	w := store.Watch()
+	w := store.Watch("test-watch")
 	defer w.Stop()
 
 	if err := store.Set("alice", testUser{Name: "Alice"}); err != nil {
@@ -188,6 +188,7 @@ func TestIntegration_TypedStore_Watch(t *testing.T) {
 		if e.Value.Name != "Alice" {
 			t.Fatalf("expected Name=Alice, got %q", e.Value.Name)
 		}
+		e.Ack()
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for watch event")
 	}

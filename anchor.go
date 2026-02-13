@@ -183,11 +183,14 @@ func (a *App) Start(ctx context.Context) error {
 	}
 	a.snapStore = snapStore
 
-	// Initialize the FSM table.
+	// Initialize the FSM tables.
 	f := (*fsm)(a)
 	if err := f.initTable(); err != nil {
 		return fmt.Errorf("create fsm table: %w", err)
 	}
+
+	// Unblock watcher drain loops now that the DB is ready.
+	a.watches.setDB(a.db)
 
 	// 4. Create TCP transport. Pass nil for the advertise address so the
 	// transport uses the listener's actual bound address (important when

@@ -1,6 +1,7 @@
 package anchor
 
 import (
+	"database/sql"
 	"encoding/json"
 	"sync"
 )
@@ -19,29 +20,28 @@ type Event struct {
 	Kind   string
 	Key    string
 	Value  json.RawMessage // nil for deletes
+
+	raftIndex uint64
+	ack       chan struct{}
 }
 
-// Watcher receives events for a specific kind. It uses an internal unbounded
-// queue so the FSM's Apply never blocks on slow consumers.
+// Ack acknowledges the event, advancing the subscriber's cursor so that the
+// event will not be redelivered.
+func (e *Event) Ack() {
+	close(e.ack)
+}
+
+// Watcher receives events for a specific kind. It reads persisted events from
+// SQLite one at a time, delivers each on the output channel, and waits for an
+// Ack before advancing the cursor.
 type Watcher struct {
-	kind   string
-	out    chan Event
-	signal chan struct{}
-	done   chan struct{}
-
-	mu  sync.Mutex
-	buf []Event
-}
-
-func newWatcher(kind string) *Watcher {
-	w := &Watcher{
-		kind:   kind,
-		out:    make(chan Event),
-		signal: make(chan struct{}, 1),
-		done:   make(chan struct{}),
-	}
-	go w.drain()
-	return w
+	kind    string
+	name    string
+	hub     *watchHub
+	out     chan Event
+	signal  chan struct{}
+	done    chan struct{}
+	stopped chan struct{} // closed when drain exits
 }
 
 // Events returns the channel on which events are delivered.
@@ -49,50 +49,90 @@ func (w *Watcher) Events() <-chan Event {
 	return w.out
 }
 
-// Stop stops the watcher. The events channel will be closed.
+// Stop stops the watcher and waits for the drain goroutine to exit. The
+// events channel will be closed.
 func (w *Watcher) Stop() {
 	close(w.done)
+	<-w.stopped
 }
 
-// send enqueues an event for delivery (called by the FSM, never blocks).
-func (w *Watcher) send(e Event) {
-	w.mu.Lock()
-	w.buf = append(w.buf, e)
-	w.mu.Unlock()
-
-	// Non-blocking signal to the drain goroutine.
-	select {
-	case w.signal <- struct{}{}:
-	default:
-	}
-}
-
-// drain moves events from the buffer to the output channel.
+// drain reads events from the database and delivers them one at a time.
 func (w *Watcher) drain() {
+	defer close(w.stopped)
 	defer close(w.out)
-	for {
-		w.mu.Lock()
-		buf := w.buf
-		w.buf = nil
-		w.mu.Unlock()
 
-		for _, e := range buf {
+	// Wait for the DB to be ready (modules init before DB opens).
+	select {
+	case <-w.hub.ready:
+	case <-w.done:
+		return
+	}
+
+	// Read initial cursor position.
+	var cursor int64
+	err := w.hub.db.QueryRow(
+		`SELECT pos FROM fsm_cursors WHERE name = ?`, w.name,
+	).Scan(&cursor)
+	if err != nil && err != sql.ErrNoRows {
+		return
+	}
+
+	for {
+		// Query next event after cursor.
+		var e Event
+		var change int
+		var val string
+		err := w.hub.db.QueryRow(
+			`SELECT raft_index, change, key, value FROM fsm_events WHERE kind = ? AND raft_index > ? ORDER BY raft_index LIMIT 1`,
+			w.kind, cursor,
+		).Scan(&e.raftIndex, &change, &e.Key, &val)
+
+		if err == sql.ErrNoRows {
+			// No events available; wait for a signal or shutdown.
 			select {
-			case w.out <- e:
+			case <-w.signal:
+				continue
 			case <-w.done:
 				return
 			}
 		}
-
-		if len(buf) > 0 {
-			// We delivered events; check for more without blocking.
-			continue
+		if err != nil {
+			return
 		}
 
-		// No events in buffer; wait for a signal or shutdown.
+		e.Change = ChangeType(change)
+		e.Kind = w.kind
+		if val != "" {
+			e.Value = json.RawMessage(val)
+		}
+		e.ack = make(chan struct{})
+
+		// Deliver event (blocks until consumer takes it).
 		select {
-		case <-w.signal:
+		case w.out <- e:
 		case <-w.done:
+			return
+		}
+
+		// Wait for ack. If done fires concurrently, still prefer ack so
+		// the cursor advances for events the consumer already processed.
+		select {
+		case <-e.ack:
+		case <-w.done:
+			select {
+			case <-e.ack:
+			default:
+				return
+			}
+		}
+
+		// Advance cursor.
+		cursor = int64(e.raftIndex)
+		_, err = w.hub.db.Exec(
+			`INSERT INTO fsm_cursors(name, pos) VALUES(?, ?) ON CONFLICT(name) DO UPDATE SET pos = excluded.pos`,
+			w.name, cursor,
+		)
+		if err != nil {
 			return
 		}
 	}
@@ -102,28 +142,51 @@ func (w *Watcher) drain() {
 type watchHub struct {
 	mu       sync.Mutex
 	watchers map[string][]*Watcher
+
+	db    *sql.DB
+	ready chan struct{}
 }
 
 func newWatchHub() *watchHub {
 	return &watchHub{
 		watchers: make(map[string][]*Watcher),
+		ready:    make(chan struct{}),
 	}
 }
 
-func (h *watchHub) subscribe(kind string) *Watcher {
-	w := newWatcher(kind)
+// setDB provides the database handle and unblocks all waiting drain loops.
+func (h *watchHub) setDB(db *sql.DB) {
+	h.db = db
+	close(h.ready)
+}
+
+func (h *watchHub) subscribe(kind, name string) *Watcher {
+	w := &Watcher{
+		kind:    kind,
+		name:    name,
+		hub:     h,
+		out:     make(chan Event),
+		signal:  make(chan struct{}, 1),
+		done:    make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
 	h.mu.Lock()
 	h.watchers[kind] = append(h.watchers[kind], w)
 	h.mu.Unlock()
+	go w.drain()
 	return w
 }
 
-func (h *watchHub) notify(e Event) {
+// signal wakes all watchers for the given kind to check for new events.
+func (h *watchHub) signal(kind string) {
 	h.mu.Lock()
-	ws := h.watchers[e.Kind]
+	ws := h.watchers[kind]
 	h.mu.Unlock()
 	for _, w := range ws {
-		w.send(e)
+		select {
+		case w.signal <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -139,6 +202,13 @@ type TypedEvent[T any] struct {
 	Key    string
 	Value  T     // zero value for deletes
 	Err    error // non-nil if JSON deserialization failed
+
+	ack chan struct{}
+}
+
+// Ack acknowledges the typed event.
+func (e *TypedEvent[T]) Ack() {
+	close(e.ack)
 }
 
 func newTypedWatcher[T any](w *Watcher) *TypedWatcher[T] {
@@ -166,6 +236,7 @@ func (tw *TypedWatcher[T]) convert() {
 		te := TypedEvent[T]{
 			Change: e.Change,
 			Key:    e.Key,
+			ack:    e.ack,
 		}
 		if len(e.Value) > 0 {
 			if err := json.Unmarshal(e.Value, &te.Value); err != nil {

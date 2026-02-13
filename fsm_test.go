@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/raft"
 	"github.com/neilotoole/slogt"
 	_ "modernc.org/sqlite"
 )
+
+var testRaftIndex atomic.Uint64
 
 // testFSM creates a SQLite-backed FSM for testing.
 func testFSM(t *testing.T) *fsm {
@@ -22,9 +25,10 @@ func testFSM(t *testing.T) *fsm {
 	}
 	t.Cleanup(func() { db.Close() })
 
+	hub := newWatchHub()
 	app := &App{
 		db:      db,
-		watches: newWatchHub(),
+		watches: hub,
 		kinds:   make(map[string]kindInfo),
 		logger:  slogt.New(t),
 	}
@@ -32,6 +36,7 @@ func testFSM(t *testing.T) *fsm {
 	if err := f.initTable(); err != nil {
 		t.Fatal(err)
 	}
+	hub.setDB(db)
 	return f
 }
 
@@ -46,7 +51,8 @@ func applySet(t *testing.T, f *fsm, kind, key string, value any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp := f.Apply(&raft.Log{Data: b})
+	idx := testRaftIndex.Add(1)
+	resp := f.Apply(&raft.Log{Index: idx, Data: b})
 	if err, ok := resp.(error); ok {
 		t.Fatal(err)
 	}
@@ -59,7 +65,8 @@ func applyDelete(t *testing.T, f *fsm, kind, key string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp := f.Apply(&raft.Log{Data: b})
+	idx := testRaftIndex.Add(1)
+	resp := f.Apply(&raft.Log{Index: idx, Data: b})
 	if err, ok := resp.(error); ok {
 		t.Fatal(err)
 	}

@@ -94,7 +94,7 @@ func (m *Module) now() time.Time {
 }
 
 func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]) {
-	w := store.Watch()
+	w := store.Watch("ssh_authorized_keys")
 	defer w.Stop()
 
 	for {
@@ -107,6 +107,7 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 			}
 			if e.Err != nil {
 				m.logger.Error("error deserializing event", "key", e.Key, "err", e.Err)
+				e.Ack()
 				continue
 			}
 
@@ -121,6 +122,7 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 			case anchor.ChangeDelete:
 				m.logger.Warn("refusing to remove all keys (delete event); to remove keys, set an explicit list instead", "username", username)
 			}
+			e.Ack()
 		}
 	}
 }

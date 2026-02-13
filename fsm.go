@@ -2,6 +2,7 @@ package anchor
 
 import (
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,20 +10,16 @@ import (
 	"github.com/hashicorp/raft"
 )
 
+//go:embed schema.sql
+var fsmSchema string
+
 // fsm implements raft.FSM using a type alias so that Apply/Snapshot/Restore
 // are not exposed on the public App type.
 type fsm App
 
-// initTable creates the fsm_kv table if it does not exist.
+// initTable creates the FSM tables if they do not exist.
 func (f *fsm) initTable() error {
-	_, err := f.db.Exec(`
-		CREATE TABLE IF NOT EXISTS fsm_kv (
-			kind  TEXT NOT NULL,
-			key   TEXT NOT NULL,
-			value TEXT NOT NULL,
-			PRIMARY KEY (kind, key)
-		) STRICT;
-	`)
+	_, err := f.db.Exec(fsmSchema)
 	return err
 }
 
@@ -33,30 +30,63 @@ func (f *fsm) Apply(l *raft.Log) any {
 		panic(fmt.Sprintf("failed to unmarshal command: %v", err))
 	}
 
-	var err error
-	var e Event
+	tx, err := f.db.Begin()
+	if err != nil {
+		panic(fmt.Sprintf("failed to begin transaction: %v", err))
+	}
+	defer tx.Rollback()
+
+	var change ChangeType
 	switch cmd.Type {
 	case CmdSet:
-		_, err = f.db.Exec(
+		_, err = tx.Exec(
 			`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)
 			 ON CONFLICT (kind, key) DO UPDATE SET value = excluded.value`,
 			cmd.Kind, cmd.Key, string(cmd.Value),
 		)
-		e = Event{Change: ChangeSet, Kind: cmd.Kind, Key: cmd.Key, Value: cmd.Value}
+		change = ChangeSet
 	case CmdDelete:
-		_, err = f.db.Exec(
+		_, err = tx.Exec(
 			`DELETE FROM fsm_kv WHERE kind = ? AND key = ?`,
 			cmd.Kind, cmd.Key,
 		)
-		e = Event{Change: ChangeDelete, Kind: cmd.Kind, Key: cmd.Key}
+		change = ChangeDelete
 	default:
 		panic(fmt.Sprintf("unrecognized command type: %s", cmd.Type))
 	}
 	if err != nil {
-		return err
+		panic(fmt.Sprintf("failed to apply kv command: %v", err))
 	}
 
-	f.watches.notify(e)
+	// Insert event row atomically with the KV change. The UPSERT with
+	// RETURNING tells us whether a new row was actually inserted (replay
+	// idempotency).
+	var value string
+	if cmd.Type == CmdSet {
+		value = string(cmd.Value)
+	}
+	var inserted bool
+	var dummy int64
+	err = tx.QueryRow(
+		`INSERT INTO fsm_events(raft_index, kind, change, key, value) VALUES(?, ?, ?, ?, ?)
+		 ON CONFLICT(raft_index) DO NOTHING RETURNING raft_index`,
+		l.Index, cmd.Kind, int(change), cmd.Key, value,
+	).Scan(&dummy)
+	if err == sql.ErrNoRows {
+		inserted = false
+	} else if err != nil {
+		panic(fmt.Sprintf("failed to insert event: %v", err))
+	} else {
+		inserted = true
+	}
+
+	if err := tx.Commit(); err != nil {
+		panic(fmt.Sprintf("failed to commit transaction: %v", err))
+	}
+
+	if inserted {
+		f.watches.signal(cmd.Kind)
+	}
 	return nil
 }
 
@@ -108,6 +138,12 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(`DELETE FROM fsm_kv`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM fsm_events`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM fsm_cursors`); err != nil {
 		return err
 	}
 
