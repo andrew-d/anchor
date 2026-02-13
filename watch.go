@@ -154,9 +154,10 @@ type watchHub struct {
 	db *sql.DB
 }
 
-func newWatchHub() *watchHub {
+func newWatchHub(db *sql.DB) *watchHub {
 	return &watchHub{
 		watchers: make(map[string][]*Watcher),
+		db:       db,
 	}
 }
 

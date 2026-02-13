@@ -91,10 +91,9 @@ func New(config Config) *App {
 		logger = slog.Default()
 	}
 	return &App{
-		config:  config,
-		watches: newWatchHub(),
-		kinds:   make(map[string]kindInfo),
-		logger:  logger,
+		config: config,
+		kinds:  make(map[string]kindInfo),
+		logger: logger,
 	}
 }
 
@@ -178,9 +177,9 @@ func (a *App) Start(ctx context.Context) error {
 		return fmt.Errorf("create fsm table: %w", err)
 	}
 
-	// Make the DB available to watchers before modules init, so drain
-	// goroutines started during Init can query immediately.
-	a.watches.db = a.db
+	// Create the watch hub now that the DB is ready, before modules init
+	// so drain goroutines started during Init can query immediately.
+	a.watches = newWatchHub(a.db)
 
 	// 3. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {
