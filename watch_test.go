@@ -48,7 +48,7 @@ func insertEvent(t *testing.T, db *sql.DB, raftIndex int64, kind string, change 
 func TestWatcher_Delivery(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 	w := hub.subscribe("users", "test-delivery")
 	defer w.Stop()
 
@@ -75,7 +75,7 @@ func TestWatcher_Delivery(t *testing.T) {
 func TestWatcher_MultipleEvents(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 	w := hub.subscribe("servers", "test-multi")
 	defer w.Stop()
 
@@ -101,7 +101,7 @@ func TestWatcher_MultipleEvents(t *testing.T) {
 func TestWatcher_KindFiltering(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 	usersW := hub.subscribe("users", "test-filter")
 	defer usersW.Stop()
 
@@ -125,7 +125,7 @@ func TestWatcher_KindFiltering(t *testing.T) {
 func TestWatcher_DeleteEvent(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 	w := hub.subscribe("users", "test-delete")
 	defer w.Stop()
 
@@ -152,7 +152,7 @@ func TestWatcher_DeleteEvent(t *testing.T) {
 func TestTypedWatcher(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 	w := hub.subscribe("users", "test-typed")
 	tw := newTypedWatcher[map[string]string](w)
 	defer tw.Stop()
@@ -180,7 +180,7 @@ func TestTypedWatcher(t *testing.T) {
 func TestWatcher_Stop(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 	w := hub.subscribe("users", "test-stop")
 	w.Stop()
 
@@ -205,7 +205,7 @@ func TestWatcher_Stop(t *testing.T) {
 func TestWatcher_CursorPersistence(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 
 	// Insert 3 events.
 	insertEvent(t, db, 1, "users", ChangeSet, "a", `"1"`)
@@ -249,7 +249,7 @@ func TestWatcher_CursorPersistence(t *testing.T) {
 func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub()
-	hub.setDB(db)
+	hub.db = db
 
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
 
@@ -284,35 +284,4 @@ func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 	w2.Stop()
 }
 
-func TestWatcher_WaitsForReady(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub()
-	// Do NOT call setDB yet.
 
-	w := hub.subscribe("users", "ready-test")
-	defer w.Stop()
-
-	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
-
-	// Should not deliver anything since DB is not set.
-	select {
-	case <-w.Events():
-		t.Fatal("received event before setDB")
-	case <-time.After(200 * time.Millisecond):
-		// Expected: no delivery yet.
-	}
-
-	// Now set the DB and signal.
-	hub.setDB(db)
-	hub.signal("users")
-
-	select {
-	case e := <-w.Events():
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
-		}
-		e.Ack()
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event after setDB")
-	}
-}

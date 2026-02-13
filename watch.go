@@ -61,13 +61,6 @@ func (w *Watcher) drain() {
 	defer close(w.stopped)
 	defer close(w.out)
 
-	// Wait for the DB to be ready (modules init before DB opens).
-	select {
-	case <-w.hub.ready:
-	case <-w.done:
-		return
-	}
-
 	// Read initial cursor position.
 	var cursor int64
 	err := w.hub.db.QueryRow(
@@ -143,21 +136,13 @@ type watchHub struct {
 	mu       sync.Mutex
 	watchers map[string][]*Watcher
 
-	db    *sql.DB
-	ready chan struct{}
+	db *sql.DB
 }
 
 func newWatchHub() *watchHub {
 	return &watchHub{
 		watchers: make(map[string][]*Watcher),
-		ready:    make(chan struct{}),
 	}
-}
-
-// setDB provides the database handle and unblocks all waiting drain loops.
-func (h *watchHub) setDB(db *sql.DB) {
-	h.db = db
-	close(h.ready)
 }
 
 func (h *watchHub) subscribe(kind, name string) *Watcher {

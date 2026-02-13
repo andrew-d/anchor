@@ -36,7 +36,7 @@ func testFSM(t *testing.T) *fsm {
 	if err := f.initTable(); err != nil {
 		t.Fatal(err)
 	}
-	hub.setDB(db)
+	hub.db = db
 	return f
 }
 

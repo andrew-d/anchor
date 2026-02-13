@@ -126,18 +126,7 @@ func (a *App) HTTPAddrForTest() string {
 func (a *App) Start(ctx context.Context) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
 
-	// 1. Init modules (they register kinds via Register[T]).
-	for _, m := range a.modules {
-		ic := InitContext{
-			App:    a,
-			Logger: a.logger.With("module", m.Name()),
-		}
-		if err := m.Init(a.ctx, ic); err != nil {
-			return fmt.Errorf("module %s init: %w", m.Name(), err)
-		}
-	}
-
-	// 2. Open single SQLite database and set PRAGMAs.
+	// 1. Open single SQLite database and set PRAGMAs.
 	if err := os.MkdirAll(a.config.DataDir, 0o700); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
@@ -161,7 +150,7 @@ func (a *App) Start(ctx context.Context) error {
 		}
 	}
 
-	// 3. Create TxFactory and initialize raft-sqlite stores.
+	// 2. Create TxFactory and initialize raft-sqlite stores.
 	txFactory := func(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
 		return db.BeginTx(ctx, opts)
 	}
@@ -189,8 +178,20 @@ func (a *App) Start(ctx context.Context) error {
 		return fmt.Errorf("create fsm table: %w", err)
 	}
 
-	// Unblock watcher drain loops now that the DB is ready.
-	a.watches.setDB(a.db)
+	// Make the DB available to watchers before modules init, so drain
+	// goroutines started during Init can query immediately.
+	a.watches.db = a.db
+
+	// 3. Init modules (they register kinds via Register[T]).
+	for _, m := range a.modules {
+		ic := InitContext{
+			App:    a,
+			Logger: a.logger.With("module", m.Name()),
+		}
+		if err := m.Init(a.ctx, ic); err != nil {
+			return fmt.Errorf("module %s init: %w", m.Name(), err)
+		}
+	}
 
 	// 4. Create TCP transport. Pass nil for the advertise address so the
 	// transport uses the listener's actual bound address (important when
