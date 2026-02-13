@@ -25,11 +25,12 @@ func testFSM(t *testing.T) *fsm {
 	}
 	t.Cleanup(func() { db.Close() })
 
+	logger := slogt.New(t)
 	app := &App{
 		db:      db,
-		watches: newWatchHub(db),
+		watches: newWatchHub(db, logger),
 		kinds:   make(map[string]kindInfo),
-		logger:  slogt.New(t),
+		logger:  logger,
 	}
 	f := (*fsm)(app)
 	if err := f.initTable(); err != nil {

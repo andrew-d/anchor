@@ -179,7 +179,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	// Create the watch hub now that the DB is ready, before modules init
 	// so drain goroutines started during Init can query immediately.
-	a.watches = newWatchHub(a.db)
+	a.watches = newWatchHub(a.db, a.logger)
 
 	// 3. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {

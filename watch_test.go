@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neilotoole/slogt"
 	_ "modernc.org/sqlite"
 )
 
@@ -47,7 +48,7 @@ func insertEvent(t *testing.T, db *sql.DB, raftIndex int64, kind string, change 
 
 func TestWatcher_Delivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 	w := hub.subscribe("users", "test-delivery")
 	defer w.Stop()
 
@@ -73,7 +74,7 @@ func TestWatcher_Delivery(t *testing.T) {
 
 func TestWatcher_MultipleEvents(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 	w := hub.subscribe("servers", "test-multi")
 	defer w.Stop()
 
@@ -98,7 +99,7 @@ func TestWatcher_MultipleEvents(t *testing.T) {
 
 func TestWatcher_KindFiltering(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 	usersW := hub.subscribe("users", "test-filter")
 	defer usersW.Stop()
 
@@ -121,7 +122,7 @@ func TestWatcher_KindFiltering(t *testing.T) {
 
 func TestWatcher_DeleteEvent(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 	w := hub.subscribe("users", "test-delete")
 	defer w.Stop()
 
@@ -147,7 +148,7 @@ func TestWatcher_DeleteEvent(t *testing.T) {
 
 func TestTypedWatcher(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 	w := hub.subscribe("users", "test-typed")
 	tw := newTypedWatcher[map[string]string](w)
 	defer tw.Stop()
@@ -174,7 +175,7 @@ func TestTypedWatcher(t *testing.T) {
 
 func TestWatcher_Stop(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 	w := hub.subscribe("users", "test-stop")
 	w.Stop()
 
@@ -198,7 +199,7 @@ func TestWatcher_Stop(t *testing.T) {
 
 func TestWatcher_CursorPersistence(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 
 	// Insert 3 events.
 	insertEvent(t, db, 1, "users", ChangeSet, "a", `"1"`)
@@ -241,7 +242,7 @@ func TestWatcher_CursorPersistence(t *testing.T) {
 
 func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db)
+	hub := newWatchHub(db, slogt.New(t))
 
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
 

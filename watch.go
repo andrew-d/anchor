@@ -3,6 +3,7 @@ package anchor
 import (
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"sync"
 )
 
@@ -82,6 +83,7 @@ func (w *Watcher) drain() {
 		`SELECT pos FROM fsm_cursors WHERE name = ?`, w.name,
 	).Scan(&cursor)
 	if err != nil && err != sql.ErrNoRows {
+		w.hub.logger.Error("failed to read watcher cursor", "watcher", w.name, "err", err)
 		return
 	}
 
@@ -105,6 +107,7 @@ func (w *Watcher) drain() {
 			}
 		}
 		if err != nil {
+			w.hub.logger.Error("failed to query events", "watcher", w.name, "err", err)
 			return
 		}
 
@@ -141,6 +144,7 @@ func (w *Watcher) drain() {
 			w.name, cursor,
 		)
 		if err != nil {
+			w.hub.logger.Error("failed to advance watcher cursor", "watcher", w.name, "err", err)
 			return
 		}
 	}
@@ -151,13 +155,15 @@ type watchHub struct {
 	mu       sync.Mutex
 	watchers map[string][]*Watcher
 
-	db *sql.DB
+	db     *sql.DB
+	logger *slog.Logger
 }
 
-func newWatchHub(db *sql.DB) *watchHub {
+func newWatchHub(db *sql.DB, logger *slog.Logger) *watchHub {
 	return &watchHub{
 		watchers: make(map[string][]*Watcher),
 		db:       db,
+		logger:   logger,
 	}
 }
 
