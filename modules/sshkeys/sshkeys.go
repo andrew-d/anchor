@@ -94,7 +94,7 @@ func (m *Module) now() time.Time {
 }
 
 func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]) {
-	w := store.Watch("ssh_authorized_keys")
+	w := store.Watch(m.Name())
 	defer w.Stop()
 
 	for {
