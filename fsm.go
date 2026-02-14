@@ -56,7 +56,8 @@ func (f *fsm) Apply(l *raft.Log) any {
 
 // snapshotData is the top-level structure serialized in a snapshot.
 type snapshotData struct {
-	KV []snapshotKV `json:"kv"`
+	Version int          `json:"version"`
+	KV      []snapshotKV `json:"kv"`
 }
 
 type snapshotKV struct {
@@ -93,6 +94,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 		return nil, err
 	}
 
+	data.Version = 1
 	return &fsmSnapshot{data: data}, nil
 }
 
@@ -104,6 +106,9 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	var data snapshotData
 	if err := json.NewDecoder(rc).Decode(&data); err != nil {
 		return err
+	}
+	if data.Version != 1 {
+		return fmt.Errorf("unsupported snapshot version: %d", data.Version)
 	}
 
 	tx, err := f.db.Begin()
