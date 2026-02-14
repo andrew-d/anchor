@@ -1,9 +1,12 @@
 package anchor
 
 import (
+	"context"
 	"log/slog"
 	"slices"
 	"sync"
+
+	"github.com/andrew-d/anchor/internal/retry"
 )
 
 // watchEntry is the non-generic subscription record tracked by watchHub.
@@ -21,18 +24,21 @@ type Watcher[T any] struct {
 	entry    *watchEntry
 	hub      *watchHub
 	out      chan T
-	done     chan struct{}
+	ctx      context.Context
+	cancel   context.CancelFunc
 	stopped  chan struct{}
 	stopOnce sync.Once
 }
 
 func newWatcher[T any](hub *watchHub, entry *watchEntry, readFn func() (T, error)) *Watcher[T] {
+	ctx, cancel := context.WithCancel(context.Background())
 	w := &Watcher[T]{
 		readFn:  readFn,
 		entry:   entry,
 		hub:     hub,
 		out:     make(chan T),
-		done:    make(chan struct{}),
+		ctx:     ctx,
+		cancel:  cancel,
 		stopped: make(chan struct{}),
 	}
 	go w.loop()
@@ -48,7 +54,7 @@ func (w *Watcher[T]) State() <-chan T {
 // channel will be closed.
 func (w *Watcher[T]) Stop() {
 	w.stopOnce.Do(func() {
-		close(w.done)
+		w.cancel()
 		<-w.stopped
 		w.hub.unsubscribe(w.entry)
 	})
@@ -60,21 +66,26 @@ func (w *Watcher[T]) loop() {
 	defer close(w.out)
 
 	for {
-		state, err := w.readFn()
+		state, err := retry.Do(w.ctx, func() (T, error) {
+			val, err := w.readFn()
+			if err != nil {
+				w.hub.logger.Error("failed to read watcher state", "kind", w.entry.kind, "err", err)
+			}
+			return val, err
+		})
 		if err != nil {
-			w.hub.logger.Error("failed to read watcher state", "kind", w.entry.kind, "err", err)
-			return
+			return // context canceled
 		}
 
 		select {
 		case w.out <- state:
-		case <-w.done:
+		case <-w.ctx.Done():
 			return
 		}
 
 		select {
 		case <-w.entry.signal:
-		case <-w.done:
+		case <-w.ctx.Done():
 			return
 		}
 	}
