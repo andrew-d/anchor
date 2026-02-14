@@ -276,6 +276,10 @@ func (tw *TypedWatcher[T]) convert() {
 				te.Err = err
 			}
 		}
-		tw.ch <- te
+		select {
+		case tw.ch <- te:
+		case <-tw.w.done:
+			return
+		}
 	}
 }
