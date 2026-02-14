@@ -149,6 +149,14 @@ func (w *Watcher) drain() {
 			w.hub.logger.Error("failed to advance watcher cursor", "watcher", w.name, "err", err)
 			return
 		}
+
+		// Compact events that all subscribers have processed.
+		_, err = w.hub.db.Exec(
+			`DELETE FROM fsm_events WHERE raft_index <= (SELECT MIN(pos) FROM fsm_cursors)`,
+		)
+		if err != nil {
+			w.hub.logger.Error("failed to compact events", "watcher", w.name, "err", err)
+		}
 	}
 }
 
