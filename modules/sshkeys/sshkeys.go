@@ -232,6 +232,17 @@ func (m *Module) revokeAuthorizedKeys(username string) error {
 	}
 
 	path := filepath.Join(info.homeDir, ".ssh", "authorized_keys")
+
+	// Re-check the deployment ID immediately before writing to narrow the
+	// TOCTOU window between the check in reconcile and this write.
+	depID, err := readDeploymentID(path)
+	if err != nil {
+		return fmt.Errorf("re-read deployment id for %q: %w", username, err)
+	}
+	if depID != m.deploymentID {
+		return fmt.Errorf("authorized_keys for %q changed between check and revoke (deployment: %q)", username, depID)
+	}
+
 	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: %s\n# Last updated: %s\n# Keys revoked: user removed from configuration\n",
 		m.deploymentID,
 		m.now().UTC().Format(time.RFC3339),
