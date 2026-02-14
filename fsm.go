@@ -58,9 +58,16 @@ func (f *fsm) Apply(l *raft.Log) any {
 		panic(fmt.Sprintf("failed to apply kv command: %v", err))
 	}
 
-	// Insert event row atomically with the KV change. The UPSERT with
-	// RETURNING tells us whether a new row was actually inserted (replay
-	// idempotency).
+	// Insert event row atomically with the KV change.
+	//
+	// The RETURNING clause combined with ON CONFLICT DO NOTHING means:
+	//   - New row inserted:  RETURNING produces one row, Scan succeeds.
+	//   - Duplicate raft_index: DO NOTHING fires, RETURNING produces zero
+	//     rows, and QueryRow().Scan() returns sql.ErrNoRows.
+	//
+	// This makes Apply idempotent on Raft log replay — duplicate entries
+	// are silently skipped and watchers are only signaled for genuinely
+	// new events.
 	var value string
 	if cmd.Type == CmdSet {
 		value = string(cmd.Value)

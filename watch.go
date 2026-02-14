@@ -23,7 +23,7 @@ type Event struct {
 	Key    string
 	Value  json.RawMessage // nil for deletes
 
-	raftIndex uint64
+	raftIndex int64
 	ack       *acker
 }
 
@@ -140,7 +140,7 @@ func (w *Watcher) drain() {
 		}
 
 		// Advance cursor.
-		cursor = int64(e.raftIndex)
+		cursor = e.raftIndex
 		_, err = w.hub.db.Exec(
 			`INSERT INTO fsm_cursors(name, pos) VALUES(?, ?) ON CONFLICT(name) DO UPDATE SET pos = excluded.pos`,
 			w.name, cursor,
