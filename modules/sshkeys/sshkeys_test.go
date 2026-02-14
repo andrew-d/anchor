@@ -443,8 +443,7 @@ func TestRevokeAuthorizedKeys(t *testing.T) {
 	}
 
 	// Revoke.
-	aliceHome := filepath.Join(homeBase, "alice")
-	if err := m.revokeAuthorizedKeys("alice", aliceHome); err != nil {
+	if err := m.revokeAuthorizedKeys("alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -466,11 +465,28 @@ func TestRevokeAuthorizedKeys(t *testing.T) {
 // reconcileTestModule creates a Module with test hooks for reconciliation tests.
 func reconcileTestModule(t *testing.T, homeBase string, users []enumeratedUser) *Module {
 	t.Helper()
+
+	uid := uint32(os.Getuid())
+	gid := uint32(os.Getgid())
+
+	// Build a lookup map from the enumerated users.
+	userMap := make(map[string]enumeratedUser, len(users))
+	for _, u := range users {
+		userMap[u.username] = u
+	}
+
 	return &Module{
 		deploymentID: "test-deploy",
 		nowFn:        func() time.Time { return fixedTime },
 		logger:       slog.Default(),
 		problems:     anchor.NewTestProblemReporter(slog.Default()),
+		lookupUserFn: func(username string) (userInfo, error) {
+			u, ok := userMap[username]
+			if !ok {
+				return userInfo{}, fmt.Errorf("user %q not found", username)
+			}
+			return userInfo{homeDir: u.homeDir, uid: uid, gid: gid}, nil
+		},
 		enumerateUsersFn: func() ([]enumeratedUser, error) {
 			return users, nil
 		},

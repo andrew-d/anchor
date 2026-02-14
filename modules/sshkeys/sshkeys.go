@@ -216,8 +216,16 @@ func readDeploymentID(path string) (string, error) {
 
 // revokeAuthorizedKeys writes a header-only authorized_keys file for the
 // given user, effectively revoking all SSH keys while leaving an audit trail.
-func (m *Module) revokeAuthorizedKeys(username, homeDir string) error {
-	path := filepath.Join(homeDir, ".ssh", "authorized_keys")
+func (m *Module) revokeAuthorizedKeys(username string) error {
+	info, err := m.lookupUser(username)
+	if err != nil {
+		return fmt.Errorf("user lookup failed for %q: %w", username, err)
+	}
+	if err := validateHomeDir(info.homeDir, username, info.uid, info.gid); err != nil {
+		return err
+	}
+
+	path := filepath.Join(info.homeDir, ".ssh", "authorized_keys")
 	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: %s\n# Last updated: %s\n# Keys revoked: user removed from configuration\n",
 		m.deploymentID,
 		m.now().UTC().Format(time.RFC3339),
@@ -262,7 +270,7 @@ func (m *Module) reconcile(state map[string]Config, pass *anchor.ProblemPass) {
 			continue
 		}
 
-		if err := m.revokeAuthorizedKeys(u.username, u.homeDir); err != nil {
+		if err := m.revokeAuthorizedKeys(u.username); err != nil {
 			pass.Error("revoke:"+u.username, "failed to revoke authorized_keys",
 				"username", u.username, "err", err)
 		} else {
