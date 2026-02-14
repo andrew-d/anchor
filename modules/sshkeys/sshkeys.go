@@ -50,7 +50,7 @@ type Module struct {
 
 	// enumerateUsersFn returns all system users. If nil, defaults to
 	// enumerateSystemUsers.
-	enumerateUsersFn func() ([]enumeratedUser, error)
+	enumerateUsersFn func(ctx context.Context) ([]enumeratedUser, error)
 
 	// nowFn returns the current time. If nil, defaults to time.Now.
 	nowFn func() time.Time
@@ -94,11 +94,11 @@ func (m *Module) lookupUser(username string) (userInfo, error) {
 	return userInfo{homeDir: u.HomeDir, uid: uint32(uid), gid: uint32(gid)}, nil
 }
 
-func (m *Module) enumerateUsers() ([]enumeratedUser, error) {
+func (m *Module) enumerateUsers(ctx context.Context) ([]enumeratedUser, error) {
 	if m.enumerateUsersFn != nil {
-		return m.enumerateUsersFn()
+		return m.enumerateUsersFn(ctx)
 	}
-	return enumerateSystemUsers()
+	return enumerateSystemUsers(ctx)
 }
 
 func (m *Module) now() time.Time {
@@ -130,7 +130,7 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 						"username", username, "num_keys", len(cfg.Keys))
 				}
 			}
-			m.reconcile(state, pass)
+			m.reconcile(ctx, state, pass)
 			pass.Commit()
 		}
 	}
@@ -258,8 +258,8 @@ func (m *Module) revokeAuthorizedKeys(username string) error {
 
 // reconcile enumerates system users and revokes anchor-managed
 // authorized_keys files for users not present in the current state.
-func (m *Module) reconcile(state map[string]Config, pass *anchor.ProblemPass) {
-	users, err := m.enumerateUsers()
+func (m *Module) reconcile(ctx context.Context, state map[string]Config, pass *anchor.ProblemPass) {
+	users, err := m.enumerateUsers(ctx)
 	if err != nil {
 		pass.Error("enumerate_users", "failed to enumerate system users", "err", err)
 		return

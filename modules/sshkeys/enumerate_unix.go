@@ -3,10 +3,12 @@
 package sshkeys
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // enumeratedUser holds the username and home directory of a system user.
@@ -15,10 +17,13 @@ type enumeratedUser struct {
 	homeDir  string
 }
 
+// getentTimeout is the maximum time to wait for "getent passwd" to complete.
+const getentTimeout = 30 * time.Second
+
 // enumerateSystemUsers returns all system users by trying getent first,
 // then falling back to parsing /etc/passwd directly.
-func enumerateSystemUsers() ([]enumeratedUser, error) {
-	users, err := enumerateViaGetent()
+func enumerateSystemUsers(ctx context.Context) ([]enumeratedUser, error) {
+	users, err := enumerateViaGetent(ctx)
 	if err == nil {
 		return users, nil
 	}
@@ -26,8 +31,10 @@ func enumerateSystemUsers() ([]enumeratedUser, error) {
 }
 
 // enumerateViaGetent runs "getent passwd" and parses the output.
-func enumerateViaGetent() ([]enumeratedUser, error) {
-	out, err := exec.Command("getent", "passwd").Output()
+func enumerateViaGetent(ctx context.Context) ([]enumeratedUser, error) {
+	ctx, cancel := context.WithTimeout(ctx, getentTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "getent", "passwd").Output()
 	if err != nil {
 		return nil, fmt.Errorf("getent passwd: %w", err)
 	}

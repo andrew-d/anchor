@@ -1,6 +1,7 @@
 package sshkeys
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -487,14 +488,15 @@ func reconcileTestModule(t *testing.T, homeBase string, users []enumeratedUser) 
 			}
 			return userInfo{homeDir: u.homeDir, uid: uid, gid: gid}, nil
 		},
-		enumerateUsersFn: func() ([]enumeratedUser, error) {
+		enumerateUsersFn: func(context.Context) ([]enumeratedUser, error) {
 			return users, nil
 		},
 	}
 }
 
 // withPass runs fn with a new ProblemPass and commits it afterward.
-func withPass(m *Module, fn func(pass *anchor.ProblemPass)) {
+func withPass(t *testing.T, m *Module, fn func(pass *anchor.ProblemPass)) {
+	t.Helper()
 	pass := m.problems.Begin()
 	fn(pass)
 	pass.Commit()
@@ -529,8 +531,8 @@ func TestReconcile_RevokesRemovedUser(t *testing.T) {
 	state := map[string]Config{
 		"alice": {Keys: []string{"ssh-rsa KEY"}},
 	}
-	withPass(m, func(pass *anchor.ProblemPass) {
-		m.reconcile(state, pass)
+	withPass(t, m, func(pass *anchor.ProblemPass) {
+		m.reconcile(t.Context(), state, pass)
 	})
 
 	// Alice's file should be untouched.
@@ -573,8 +575,8 @@ func TestReconcile_SkipsUnmanagedUser(t *testing.T) {
 		{username: "bob", homeDir: bobHome},
 	})
 
-	withPass(m, func(pass *anchor.ProblemPass) {
-		m.reconcile(map[string]Config{}, pass)
+	withPass(t, m, func(pass *anchor.ProblemPass) {
+		m.reconcile(t.Context(), map[string]Config{}, pass)
 	})
 
 	// Bob's file should be untouched.
@@ -605,8 +607,8 @@ func TestReconcile_WarnsOnDifferentDeployment(t *testing.T) {
 		{username: "bob", homeDir: bobHome},
 	})
 
-	withPass(m, func(pass *anchor.ProblemPass) {
-		m.reconcile(map[string]Config{}, pass)
+	withPass(t, m, func(pass *anchor.ProblemPass) {
+		m.reconcile(t.Context(), map[string]Config{}, pass)
 	})
 
 	// Bob's file should be untouched (different deployment).
@@ -632,8 +634,8 @@ func TestReconcile_SkipsUserWithNoFile(t *testing.T) {
 	})
 
 	// Should not panic or error — no authorized_keys file exists.
-	withPass(m, func(pass *anchor.ProblemPass) {
-		m.reconcile(map[string]Config{}, pass)
+	withPass(t, m, func(pass *anchor.ProblemPass) {
+		m.reconcile(t.Context(), map[string]Config{}, pass)
 	})
 
 	// Verify no file was created.
