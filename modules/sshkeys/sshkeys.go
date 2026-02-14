@@ -162,6 +162,9 @@ func (m *Module) writeAuthorizedKeys(username string, keys []string) error {
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
 		return fmt.Errorf("create .ssh dir for %q: %w", username, err)
 	}
+	if err := os.Chown(sshDir, int(info.uid), int(info.gid)); err != nil {
+		return fmt.Errorf("chown .ssh dir for %q: %w", username, err)
+	}
 
 	path := filepath.Join(sshDir, "authorized_keys")
 
@@ -181,6 +184,9 @@ func (m *Module) writeAuthorizedKeys(username string, keys []string) error {
 
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("write authorized_keys for %q: %w", username, err)
+	}
+	if err := os.Chown(path, int(info.uid), int(info.gid)); err != nil {
+		return fmt.Errorf("chown authorized_keys for %q: %w", username, err)
 	}
 	return nil
 }
@@ -232,6 +238,9 @@ func (m *Module) revokeAuthorizedKeys(username string) error {
 	)
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("revoke authorized_keys for %q: %w", username, err)
+	}
+	if err := os.Chown(path, int(info.uid), int(info.gid)); err != nil {
+		return fmt.Errorf("chown authorized_keys for %q: %w", username, err)
 	}
 	return nil
 }
