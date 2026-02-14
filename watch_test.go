@@ -2,6 +2,7 @@ package anchor
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -50,7 +51,7 @@ func insertEvent(t *testing.T, db *sql.DB, raftIndex int64, kind string, change 
 func TestWatcher_Delivery(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "test-delivery")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-delivery"))
 	defer w.Stop()
 
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `{"role":"admin"}`)
@@ -76,7 +77,7 @@ func TestWatcher_Delivery(t *testing.T) {
 func TestWatcher_MultipleEvents(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("servers", "test-multi")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("servers", "test-multi"))
 	defer w.Stop()
 
 	for i := range 5 {
@@ -101,7 +102,7 @@ func TestWatcher_MultipleEvents(t *testing.T) {
 func TestWatcher_KindFiltering(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	usersW := hub.subscribe("users", "test-filter")
+	usersW := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-filter"))
 	defer usersW.Stop()
 
 	// Insert event for a different kind.
@@ -124,7 +125,7 @@ func TestWatcher_KindFiltering(t *testing.T) {
 func TestWatcher_DeleteEvent(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "test-delete")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-delete"))
 	defer w.Stop()
 
 	insertEvent(t, db, 1, "users", ChangeDelete, "alice", "")
@@ -147,18 +148,17 @@ func TestWatcher_DeleteEvent(t *testing.T) {
 	}
 }
 
-func TestTypedWatcher(t *testing.T) {
+func TestWatcher_TypedDeserialization(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "test-typed")
-	tw := newTypedWatcher[map[string]string](w)
-	defer tw.Stop()
+	w := newWatcher[map[string]string](hub, hub.subscribe("users", "test-typed"))
+	defer w.Stop()
 
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `{"role":"admin"}`)
 	hub.signal("users")
 
 	select {
-	case e := <-tw.Events():
+	case e := <-w.Events():
 		if e.Err != nil {
 			t.Fatal(e.Err)
 		}
@@ -177,7 +177,7 @@ func TestTypedWatcher(t *testing.T) {
 func TestWatcher_Stop(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "test-stop")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-stop"))
 	w.Stop()
 
 	// Channel should eventually close.
@@ -208,7 +208,7 @@ func TestWatcher_CursorPersistence(t *testing.T) {
 	insertEvent(t, db, 3, "users", ChangeSet, "c", `"3"`)
 
 	// First watcher: ack events 1 and 2.
-	w1 := hub.subscribe("users", "persist-test")
+	w1 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "persist-test"))
 	hub.signal("users")
 
 	for i := range 2 {
@@ -226,7 +226,7 @@ func TestWatcher_CursorPersistence(t *testing.T) {
 	w1.Stop()
 
 	// Second watcher with same name: should only see event 3.
-	w2 := hub.subscribe("users", "persist-test")
+	w2 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "persist-test"))
 	hub.signal("users")
 
 	select {
@@ -248,7 +248,7 @@ func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
 
 	// First watcher: receive without ack.
-	w1 := hub.subscribe("users", "redeliver-test")
+	w1 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "redeliver-test"))
 	hub.signal("users")
 
 	select {
@@ -263,7 +263,7 @@ func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 	w1.Stop()
 
 	// Second watcher with same name: should see the same event again.
-	w2 := hub.subscribe("users", "redeliver-test")
+	w2 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "redeliver-test"))
 	hub.signal("users")
 
 	select {
@@ -281,7 +281,7 @@ func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 func TestWatcher_SpuriousSignal(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "spurious-test")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "spurious-test"))
 	defer w.Stop()
 
 	// Insert event for a different kind and signal the watched kind.
@@ -300,16 +300,16 @@ func TestWatcher_SpuriousSignal(t *testing.T) {
 func TestWatcher_ConcurrentDifferentNames(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w1 := hub.subscribe("users", "concurrent-a")
+	w1 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "concurrent-a"))
 	defer w1.Stop()
-	w2 := hub.subscribe("users", "concurrent-b")
+	w2 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "concurrent-b"))
 	defer w2.Stop()
 
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
 	hub.signal("users")
 
 	// Both watchers should independently receive the same event.
-	for _, w := range []*Watcher{w1, w2} {
+	for _, w := range []*Watcher[json.RawMessage]{w1, w2} {
 		select {
 		case e := <-w.Events():
 			if e.Key != "alice" {
@@ -317,7 +317,7 @@ func TestWatcher_ConcurrentDifferentNames(t *testing.T) {
 			}
 			e.Ack()
 		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for event on watcher %s", w.name)
+			t.Fatalf("timed out waiting for event on watcher %s", w.entry.name)
 		}
 	}
 }
@@ -325,7 +325,7 @@ func TestWatcher_ConcurrentDifferentNames(t *testing.T) {
 func TestWatcher_StopDuringAckWait(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "stop-ack-test")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "stop-ack-test"))
 
 	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
 	hub.signal("users")
@@ -353,7 +353,7 @@ func TestWatcher_StopDuringAckWait(t *testing.T) {
 func TestWatcher_Backlog(t *testing.T) {
 	db := testWatchDB(t)
 	hub := newWatchHub(db, slogt.New(t))
-	w := hub.subscribe("users", "backlog-test")
+	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "backlog-test"))
 	defer w.Stop()
 
 	// Insert many events, signal once.

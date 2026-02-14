@@ -154,12 +154,12 @@ func (s *TypedStore[T]) Delete(key string) error {
 	return nil
 }
 
-// Watch returns a typed watcher that receives events for this kind. The name
+// Watch returns a watcher that receives events for this kind. The name
 // identifies the subscriber for cursor persistence; using the same name across
 // restarts provides at-least-once delivery.
-func (s *TypedStore[T]) Watch(name string) *TypedWatcher[T] {
-	w := s.app.watches.subscribe(s.kind, name)
-	return newTypedWatcher[T](w)
+func (s *TypedStore[T]) Watch(name string) *Watcher[T] {
+	entry := s.app.watches.subscribe(s.kind, name)
+	return newWatcher[T](s.app.watches, entry)
 }
 
 // applyCommand marshals and applies a command through Raft.
