@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 )
 
@@ -45,7 +46,7 @@ func newAcker() *acker {
 	return &acker{ch: make(chan struct{})}
 }
 
-func (a *acker) ack()                 { a.once.Do(func() { close(a.ch) }) }
+func (a *acker) ack()                  { a.once.Do(func() { close(a.ch) }) }
 func (a *acker) done() <-chan struct{} { return a.ch }
 
 // watchEntry is the non-generic subscription record tracked by watchHub.
@@ -238,7 +239,7 @@ func (h *watchHub) unsubscribe(entry *watchEntry) {
 // signal wakes all watchers for the given kind to check for new events.
 func (h *watchHub) signal(kind string) {
 	h.mu.Lock()
-	es := h.entries[kind]
+	es := slices.Clone(h.entries[kind])
 	h.mu.Unlock()
 	for _, e := range es {
 		select {
