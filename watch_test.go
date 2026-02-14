@@ -3,7 +3,6 @@ package anchor
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// testWatchDB opens an on-disk SQLite database and creates the event/cursor tables.
+// testWatchDB opens an on-disk SQLite database and creates the FSM tables.
 func testWatchDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "watch.db"))
@@ -36,156 +35,166 @@ func testWatchDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// insertEvent inserts a row into fsm_events.
-func insertEvent(t *testing.T, db *sql.DB, raftIndex int64, kind string, change ChangeType, key, value string) {
+// insertKV inserts a row into fsm_kv.
+func insertKV(t *testing.T, db *sql.DB, kind, key, value string) {
 	t.Helper()
 	_, err := db.Exec(
-		`INSERT INTO fsm_events(raft_index, kind, change, key, value) VALUES(?, ?, ?, ?, ?)`,
-		raftIndex, kind, int(change), key, value,
+		`INSERT INTO fsm_kv(kind, key, value) VALUES(?, ?, ?)
+		 ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value`,
+		kind, key, value,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestWatcher_Delivery(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-delivery"))
-	defer w.Stop()
-
-	insertEvent(t, db, 1, "users", ChangeSet, "alice", `{"role":"admin"}`)
-	hub.signal("users")
-
-	select {
-	case e := <-w.Events():
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
-		}
-		if e.Change != ChangeSet {
-			t.Fatalf("expected ChangeSet, got %d", e.Change)
-		}
-		if string(e.Value) != `{"role":"admin"}` {
-			t.Fatalf("unexpected value: %s", e.Value)
-		}
-		e.Ack()
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
+// deleteKV deletes a row from fsm_kv.
+func deleteKV(t *testing.T, db *sql.DB, kind, key string) {
+	t.Helper()
+	_, err := db.Exec(`DELETE FROM fsm_kv WHERE kind = ? AND key = ?`, kind, key)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestWatcher_MultipleEvents(t *testing.T) {
+// testStoreWatcher creates a Watcher that reads all entries for a kind from
+// the given database, suitable for unit tests that don't need a full App.
+func testStoreWatcher(hub *watchHub, db *sql.DB, kind string) *Watcher[map[string]json.RawMessage] {
+	entry := hub.subscribe(kind)
+	readFn := func() (map[string]json.RawMessage, error) {
+		rows, err := db.Query(`SELECT key, value FROM fsm_kv WHERE kind = ?`, kind)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		result := make(map[string]json.RawMessage)
+		for rows.Next() {
+			var k, v string
+			if err := rows.Scan(&k, &v); err != nil {
+				return nil, err
+			}
+			result[k] = json.RawMessage(v)
+		}
+		return result, rows.Err()
+	}
+	return newWatcher(hub, entry, readFn)
+}
+
+// testKeyWatcher creates a Watcher that reads a single key from the given
+// database.
+func testKeyWatcher(hub *watchHub, db *sql.DB, kind, key string) *Watcher[json.RawMessage] {
+	entry := hub.subscribe(kind)
+	readFn := func() (json.RawMessage, error) {
+		var val string
+		err := db.QueryRow(`SELECT value FROM fsm_kv WHERE kind = ? AND key = ?`, kind, key).Scan(&val)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return json.RawMessage(val), nil
+	}
+	return newWatcher(hub, entry, readFn)
+}
+
+func TestWatcher_InitialDelivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("servers", "test-multi"))
+	hub := newWatchHub(slogt.New(t))
+
+	insertKV(t, db, "users", "alice", `{"role":"admin"}`)
+
+	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
 
-	for i := range 5 {
-		insertEvent(t, db, int64(i+1), "servers", ChangeSet, string(rune('a'+i)), `"ok"`)
-	}
-	hub.signal("servers")
-
-	for i := range 5 {
-		select {
-		case e := <-w.Events():
-			expected := string(rune('a' + i))
-			if e.Key != expected {
-				t.Fatalf("event %d: expected key=%q, got %q", i, expected, e.Key)
-			}
-			e.Ack()
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for event %d", i)
+	select {
+	case state := <-w.State():
+		if len(state) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(state))
 		}
+		if string(state["alice"]) != `{"role":"admin"}` {
+			t.Fatalf("unexpected value: %s", state["alice"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial state")
+	}
+}
+
+func TestWatcher_DeliveryAfterSignal(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(slogt.New(t))
+
+	w := testStoreWatcher(hub, db, "users")
+	defer w.Stop()
+
+	// Consume initial (empty) delivery.
+	select {
+	case state := <-w.State():
+		if len(state) != 0 {
+			t.Fatalf("expected empty initial state, got %d entries", len(state))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial state")
+	}
+
+	// Mutate and signal.
+	insertKV(t, db, "users", "alice", `{"role":"admin"}`)
+	hub.signal("users")
+
+	select {
+	case state := <-w.State():
+		if len(state) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(state))
+		}
+		if string(state["alice"]) != `{"role":"admin"}` {
+			t.Fatalf("unexpected value: %s", state["alice"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for state after signal")
 	}
 }
 
 func TestWatcher_KindFiltering(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	usersW := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-filter"))
-	defer usersW.Stop()
+	hub := newWatchHub(slogt.New(t))
 
-	// Insert event for a different kind.
-	insertEvent(t, db, 1, "servers", ChangeSet, "web1", `"ok"`)
-	// Insert event for the watched kind.
-	insertEvent(t, db, 2, "users", ChangeSet, "alice", `"ok"`)
-	hub.signal("users")
-
-	select {
-	case e := <-usersW.Events():
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
-		}
-		e.Ack()
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for users event")
-	}
-}
-
-func TestWatcher_DeleteEvent(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-delete"))
+	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
 
-	insertEvent(t, db, 1, "users", ChangeDelete, "alice", "")
-	hub.signal("users")
-
+	// Consume initial delivery.
 	select {
-	case e := <-w.Events():
-		if e.Change != ChangeDelete {
-			t.Fatalf("expected ChangeDelete, got %d", e.Change)
-		}
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
-		}
-		if e.Value != nil {
-			t.Fatalf("expected nil value for delete, got %s", e.Value)
-		}
-		e.Ack()
+	case <-w.State():
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for delete event")
+		t.Fatal("timed out waiting for initial state")
 	}
-}
 
-func TestWatcher_TypedDeserialization(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[map[string]string](hub, hub.subscribe("users", "test-typed"))
-	defer w.Stop()
+	// Insert into a different kind and signal that kind.
+	insertKV(t, db, "servers", "web1", `"ok"`)
+	hub.signal("servers")
 
-	insertEvent(t, db, 1, "users", ChangeSet, "alice", `{"role":"admin"}`)
-	hub.signal("users")
-
+	// No delivery should happen for the users watcher.
 	select {
-	case e := <-w.Events():
-		if e.Err != nil {
-			t.Fatal(e.Err)
-		}
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
-		}
-		if e.Value["role"] != "admin" {
-			t.Fatalf("expected role=admin, got %q", e.Value["role"])
-		}
-		e.Ack()
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for typed event")
+	case <-w.State():
+		t.Fatal("unexpected delivery for wrong kind")
+	case <-time.After(200 * time.Millisecond):
+		// Expected: no delivery.
 	}
 }
 
 func TestWatcher_Stop(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "test-stop"))
+	hub := newWatchHub(slogt.New(t))
+
+	w := testStoreWatcher(hub, db, "users")
 	w.Stop()
 
-	// Channel should eventually close.
+	// Channel should be closed.
 	select {
-	case _, ok := <-w.Events():
+	case _, ok := <-w.State():
 		if ok {
+			// Got initial delivery; next read should show closed.
 			select {
-			case _, ok := <-w.Events():
+			case _, ok := <-w.State():
 				if ok {
 					t.Fatal("expected channel to be closed after Stop")
 				}
@@ -198,146 +207,15 @@ func TestWatcher_Stop(t *testing.T) {
 	}
 }
 
-func TestWatcher_CursorPersistence(t *testing.T) {
+func TestWatcher_StopDuringBlockedDelivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
+	hub := newWatchHub(slogt.New(t))
 
-	// Insert 3 events.
-	insertEvent(t, db, 1, "users", ChangeSet, "a", `"1"`)
-	insertEvent(t, db, 2, "users", ChangeSet, "b", `"2"`)
-	insertEvent(t, db, 3, "users", ChangeSet, "c", `"3"`)
+	insertKV(t, db, "users", "alice", `"v1"`)
+	w := testStoreWatcher(hub, db, "users")
 
-	// First watcher: ack events 1 and 2.
-	w1 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "persist-test"))
-	hub.signal("users")
-
-	for i := range 2 {
-		select {
-		case e := <-w1.Events():
-			expected := string(rune('a' + i))
-			if e.Key != expected {
-				t.Fatalf("w1 event %d: expected key=%q, got %q", i, expected, e.Key)
-			}
-			e.Ack()
-		case <-time.After(2 * time.Second):
-			t.Fatalf("w1 timed out waiting for event %d", i)
-		}
-	}
-	w1.Stop()
-
-	// Second watcher with same name: should only see event 3.
-	w2 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "persist-test"))
-	hub.signal("users")
-
-	select {
-	case e := <-w2.Events():
-		if e.Key != "c" {
-			t.Fatalf("expected key=c, got %q", e.Key)
-		}
-		e.Ack()
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event c")
-	}
-	w2.Stop()
-}
-
-func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-
-	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
-
-	// First watcher: receive without ack.
-	w1 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "redeliver-test"))
-	hub.signal("users")
-
-	select {
-	case e := <-w1.Events():
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
-		}
-		// No ack!
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
-	}
-	w1.Stop()
-
-	// Second watcher with same name: should see the same event again.
-	w2 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "redeliver-test"))
-	hub.signal("users")
-
-	select {
-	case e := <-w2.Events():
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice on redeliver, got %q", e.Key)
-		}
-		e.Ack()
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for redelivered event")
-	}
-	w2.Stop()
-}
-
-func TestWatcher_SpuriousSignal(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "spurious-test"))
-	defer w.Stop()
-
-	// Insert event for a different kind and signal the watched kind.
-	insertEvent(t, db, 1, "servers", ChangeSet, "web1", `"ok"`)
-	hub.signal("users")
-
-	// No event should be delivered.
-	select {
-	case e := <-w.Events():
-		t.Fatalf("unexpected event: key=%q", e.Key)
-	case <-time.After(200 * time.Millisecond):
-		// Expected: no delivery.
-	}
-}
-
-func TestWatcher_ConcurrentDifferentNames(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w1 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "concurrent-a"))
-	defer w1.Stop()
-	w2 := newWatcher[json.RawMessage](hub, hub.subscribe("users", "concurrent-b"))
-	defer w2.Stop()
-
-	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
-	hub.signal("users")
-
-	// Both watchers should independently receive the same event.
-	for _, w := range []*Watcher[json.RawMessage]{w1, w2} {
-		select {
-		case e := <-w.Events():
-			if e.Key != "alice" {
-				t.Fatalf("expected key=alice, got %q", e.Key)
-			}
-			e.Ack()
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for event on watcher %s", w.entry.name)
-		}
-	}
-}
-
-func TestWatcher_StopDuringAckWait(t *testing.T) {
-	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "stop-ack-test"))
-
-	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
-	hub.signal("users")
-
-	// Receive the event but don't ack.
-	select {
-	case <-w.Events():
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
-	}
-
-	// Stop while drain is waiting for ack. Should not hang.
+	// Don't consume the initial delivery — the loop is blocked trying to send.
+	// Stop should not hang.
 	done := make(chan struct{})
 	go func() {
 		w.Stop()
@@ -346,33 +224,126 @@ func TestWatcher_StopDuringAckWait(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Stop() blocked during ack wait")
+		t.Fatal("Stop() blocked during delivery")
 	}
 }
 
-func TestWatcher_Backlog(t *testing.T) {
+func TestWatcher_MultipleConcurrent(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(db, slogt.New(t))
-	w := newWatcher[json.RawMessage](hub, hub.subscribe("users", "backlog-test"))
+	hub := newWatchHub(slogt.New(t))
+
+	insertKV(t, db, "users", "alice", `"v1"`)
+
+	w1 := testStoreWatcher(hub, db, "users")
+	defer w1.Stop()
+	w2 := testStoreWatcher(hub, db, "users")
+	defer w2.Stop()
+
+	// Both should see the same initial state.
+	for _, w := range []*Watcher[map[string]json.RawMessage]{w1, w2} {
+		select {
+		case state := <-w.State():
+			if string(state["alice"]) != `"v1"` {
+				t.Fatalf("unexpected value: %s", state["alice"])
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for state")
+		}
+	}
+}
+
+func TestWatcher_EmptyState(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(slogt.New(t))
+
+	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
 
-	// Insert many events, signal once.
-	for i := range 20 {
-		insertEvent(t, db, int64(i+1), "users", ChangeSet, fmt.Sprintf("key-%d", i), `"v"`)
-	}
-	hub.signal("users")
-
-	// Drain all 20, acking each before receiving the next.
-	for i := range 20 {
-		select {
-		case e := <-w.Events():
-			expected := fmt.Sprintf("key-%d", i)
-			if e.Key != expected {
-				t.Fatalf("event %d: expected key=%q, got %q", i, expected, e.Key)
-			}
-			e.Ack()
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for event %d", i)
+	select {
+	case state := <-w.State():
+		if len(state) != 0 {
+			t.Fatalf("expected empty map, got %d entries", len(state))
 		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for empty state")
+	}
+}
+
+func TestWatcher_WatchKey(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(slogt.New(t))
+
+	insertKV(t, db, "motd", "default", `"Hello, world!"`)
+
+	w := testKeyWatcher(hub, db, "motd", "default")
+	defer w.Stop()
+
+	select {
+	case val := <-w.State():
+		if string(val) != `"Hello, world!"` {
+			t.Fatalf("unexpected value: %s", val)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for key state")
+	}
+}
+
+func TestWatcher_WatchKeyMissing(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(slogt.New(t))
+
+	w := testKeyWatcher(hub, db, "motd", "default")
+	defer w.Stop()
+
+	select {
+	case val := <-w.State():
+		if val != nil {
+			t.Fatalf("expected nil for missing key, got %s", val)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for key state")
+	}
+}
+
+func TestWatcher_SignalAll(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(slogt.New(t))
+
+	w1 := testStoreWatcher(hub, db, "users")
+	defer w1.Stop()
+	w2 := testStoreWatcher(hub, db, "servers")
+	defer w2.Stop()
+
+	// Consume initial deliveries.
+	for _, w := range []*Watcher[map[string]json.RawMessage]{w1, w2} {
+		select {
+		case <-w.State():
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for initial state")
+		}
+	}
+
+	// Insert data for both kinds.
+	insertKV(t, db, "users", "alice", `"v1"`)
+	insertKV(t, db, "servers", "web1", `"ok"`)
+	hub.signalAll()
+
+	// Both should get the updated state.
+	select {
+	case state := <-w1.State():
+		if string(state["alice"]) != `"v1"` {
+			t.Fatalf("unexpected users value: %s", state["alice"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for users state after signalAll")
+	}
+
+	select {
+	case state := <-w2.State():
+		if string(state["web1"]) != `"ok"` {
+			t.Fatalf("unexpected servers value: %s", state["web1"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for servers state after signalAll")
 	}
 }

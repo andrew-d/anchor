@@ -177,10 +177,9 @@ func (a *App) Start(ctx context.Context) error {
 		return fmt.Errorf("create fsm table: %w", err)
 	}
 
-	// Create the watch hub now that the DB is ready, before modules init
-	// so drain goroutines started during Init can query immediately.
-	a.watches = newWatchHub(a.db, a.logger)
-	a.wg.Go(func() { a.watches.compact(a.ctx) })
+	// Create the watch hub before modules init so watchers started during
+	// Init can subscribe immediately.
+	a.watches = newWatchHub(a.logger)
 
 	// 3. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {

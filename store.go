@@ -154,12 +154,20 @@ func (s *TypedStore[T]) Delete(key string) error {
 	return nil
 }
 
-// Watch returns a watcher that receives events for this kind. The name
-// identifies the subscriber for cursor persistence; using the same name across
-// restarts provides at-least-once delivery.
-func (s *TypedStore[T]) Watch(name string) *Watcher[T] {
-	entry := s.app.watches.subscribe(s.kind, name)
-	return newWatcher[T](s.app.watches, entry)
+// WatchStore returns a watcher that delivers the full state (all entries) for
+// a kind whenever it changes. The first delivery happens immediately.
+func WatchStore[T Kinded](store *TypedStore[T]) *Watcher[map[string]T] {
+	entry := store.app.watches.subscribe(store.kind)
+	return newWatcher(store.app.watches, entry, store.List)
+}
+
+// WatchKey returns a watcher that delivers the value for a single key whenever
+// it changes. The first delivery happens immediately.
+func WatchKey[T Kinded](store *TypedStore[T], key string) *Watcher[T] {
+	entry := store.app.watches.subscribe(store.kind)
+	return newWatcher(store.app.watches, entry, func() (T, error) {
+		return store.Get(key)
+	})
 }
 
 // applyCommand marshals and applies a command through Raft.

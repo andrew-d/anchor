@@ -30,27 +30,19 @@ func (f *fsm) Apply(l *raft.Log) any {
 		panic(fmt.Sprintf("failed to unmarshal command: %v", err))
 	}
 
-	tx, err := f.db.Begin()
-	if err != nil {
-		panic(fmt.Sprintf("failed to begin transaction: %v", err))
-	}
-	defer tx.Rollback()
-
-	var change ChangeType
+	var err error
 	switch cmd.Type {
 	case CmdSet:
-		_, err = tx.Exec(
+		_, err = f.db.Exec(
 			`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)
 			 ON CONFLICT (kind, key) DO UPDATE SET value = excluded.value`,
 			cmd.Kind, cmd.Key, string(cmd.Value),
 		)
-		change = ChangeSet
 	case CmdDelete:
-		_, err = tx.Exec(
+		_, err = f.db.Exec(
 			`DELETE FROM fsm_kv WHERE kind = ? AND key = ?`,
 			cmd.Kind, cmd.Key,
 		)
-		change = ChangeDelete
 	default:
 		panic(fmt.Sprintf("unrecognized command type: %s", cmd.Type))
 	}
@@ -58,52 +50,13 @@ func (f *fsm) Apply(l *raft.Log) any {
 		panic(fmt.Sprintf("failed to apply kv command: %v", err))
 	}
 
-	// Insert event row atomically with the KV change.
-	//
-	// The RETURNING clause combined with ON CONFLICT DO NOTHING means:
-	//   - New row inserted:  RETURNING produces one row, Scan succeeds.
-	//   - Duplicate raft_index: DO NOTHING fires, RETURNING produces zero
-	//     rows, and QueryRow().Scan() returns sql.ErrNoRows.
-	//
-	// This makes Apply idempotent on Raft log replay — duplicate entries
-	// are silently skipped and watchers are only signaled for genuinely
-	// new events.
-	var value string
-	if cmd.Type == CmdSet {
-		value = string(cmd.Value)
-	}
-	var inserted bool
-	var dummy int64
-	err = tx.QueryRow(
-		`INSERT INTO fsm_events(raft_index, kind, change, key, value) VALUES(?, ?, ?, ?, ?)
-		 ON CONFLICT(raft_index) DO NOTHING RETURNING raft_index`,
-		l.Index, cmd.Kind, int(change), cmd.Key, value,
-	).Scan(&dummy)
-	if err == sql.ErrNoRows {
-		inserted = false
-	} else if err != nil {
-		panic(fmt.Sprintf("failed to insert event: %v", err))
-	} else {
-		inserted = true
-	}
-
-	if err := tx.Commit(); err != nil {
-		panic(fmt.Sprintf("failed to commit transaction: %v", err))
-	}
-
-	if inserted {
-		f.watches.signal(cmd.Kind)
-	}
+	f.watches.signal(cmd.Kind)
 	return nil
 }
 
-// snapshotData is the top-level structure serialized in a snapshot. It
-// includes all FSM tables so that events and cursor positions survive
-// snapshot + log truncation.
+// snapshotData is the top-level structure serialized in a snapshot.
 type snapshotData struct {
-	KV      []snapshotKV     `json:"kv"`
-	Events  []snapshotEvent  `json:"events"`
-	Cursors []snapshotCursor `json:"cursors"`
+	KV []snapshotKV `json:"kv"`
 }
 
 type snapshotKV struct {
@@ -112,23 +65,8 @@ type snapshotKV struct {
 	Value json.RawMessage `json:"value"`
 }
 
-type snapshotEvent struct {
-	RaftIndex int64  `json:"raft_index"`
-	Kind      string `json:"kind"`
-	Change    int    `json:"change"`
-	Key       string `json:"key"`
-	Value     string `json:"value"`
-}
-
-type snapshotCursor struct {
-	Name string `json:"name"`
-	Pos  int64  `json:"pos"`
-}
-
 // Snapshot returns a snapshot of the FSM state.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
-	// NOTE: All three tables are read inside a single transaction so the
-	// snapshot is self-consistent.
 	tx, err := f.db.Begin()
 	if err != nil {
 		return nil, err
@@ -137,56 +75,21 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 
 	var data snapshotData
 
-	// KV entries.
-	kvRows, err := tx.Query(`SELECT kind, key, value FROM fsm_kv`)
+	rows, err := tx.Query(`SELECT kind, key, value FROM fsm_kv`)
 	if err != nil {
 		return nil, err
 	}
-	defer kvRows.Close()
-	for kvRows.Next() {
+	defer rows.Close()
+	for rows.Next() {
 		var e snapshotKV
 		var val string
-		if err := kvRows.Scan(&e.Kind, &e.Key, &val); err != nil {
+		if err := rows.Scan(&e.Kind, &e.Key, &val); err != nil {
 			return nil, err
 		}
 		e.Value = json.RawMessage(val)
 		data.KV = append(data.KV, e)
 	}
-	if err := kvRows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Events.
-	eventRows, err := tx.Query(`SELECT raft_index, kind, change, key, value FROM fsm_events`)
-	if err != nil {
-		return nil, err
-	}
-	defer eventRows.Close()
-	for eventRows.Next() {
-		var e snapshotEvent
-		if err := eventRows.Scan(&e.RaftIndex, &e.Kind, &e.Change, &e.Key, &e.Value); err != nil {
-			return nil, err
-		}
-		data.Events = append(data.Events, e)
-	}
-	if err := eventRows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Cursors.
-	cursorRows, err := tx.Query(`SELECT name, pos FROM fsm_cursors`)
-	if err != nil {
-		return nil, err
-	}
-	defer cursorRows.Close()
-	for cursorRows.Next() {
-		var c snapshotCursor
-		if err := cursorRows.Scan(&c.Name, &c.Pos); err != nil {
-			return nil, err
-		}
-		data.Cursors = append(data.Cursors, c)
-	}
-	if err := cursorRows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
@@ -212,12 +115,6 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	if _, err := tx.Exec(`DELETE FROM fsm_kv`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM fsm_events`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM fsm_cursors`); err != nil {
-		return err
-	}
 
 	for _, e := range data.KV {
 		if _, err := tx.Exec(`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)`,
@@ -225,19 +122,13 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 			return err
 		}
 	}
-	for _, e := range data.Events {
-		if _, err := tx.Exec(`INSERT INTO fsm_events (raft_index, kind, change, key, value) VALUES (?, ?, ?, ?, ?)`,
-			e.RaftIndex, e.Kind, e.Change, e.Key, e.Value); err != nil {
-			return err
-		}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
-	for _, c := range data.Cursors {
-		if _, err := tx.Exec(`INSERT INTO fsm_cursors (name, pos) VALUES (?, ?)`,
-			c.Name, c.Pos); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+
+	f.watches.signalAll()
+	return nil
 }
 
 // fsmGet reads a single value from the local FSM state.

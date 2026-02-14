@@ -166,30 +166,36 @@ func TestIntegration_TypedStore_Delete(t *testing.T) {
 	}
 }
 
-func TestIntegration_TypedStore_Watch(t *testing.T) {
+func TestIntegration_TypedStore_WatchStore(t *testing.T) {
 	app := testApp(t)
 	store := Register[testUser](app)
 
-	w := store.Watch("test-watch")
+	w := WatchStore(store)
 	defer w.Stop()
+
+	// Consume initial (empty) state.
+	select {
+	case state := <-w.State():
+		if len(state) != 0 {
+			t.Fatalf("expected empty initial state, got %d entries", len(state))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for initial state")
+	}
 
 	if err := store.Set("alice", testUser{Name: "Alice"}); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
-	case e := <-w.Events():
-		if e.Err != nil {
-			t.Fatal(e.Err)
+	case state := <-w.State():
+		if len(state) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(state))
 		}
-		if e.Key != "alice" {
-			t.Fatalf("expected key=alice, got %q", e.Key)
+		if state["alice"].Name != "Alice" {
+			t.Fatalf("expected Name=Alice, got %q", state["alice"].Name)
 		}
-		if e.Value.Name != "Alice" {
-			t.Fatalf("expected Name=Alice, got %q", e.Value.Name)
-		}
-		e.Ack()
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for watch event")
+		t.Fatal("timed out waiting for watch state")
 	}
 }

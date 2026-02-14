@@ -94,35 +94,24 @@ func (m *Module) now() time.Time {
 }
 
 func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]) {
-	w := store.Watch(m.Name())
+	w := anchor.WatchStore(store)
 	defer w.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case e, ok := <-w.Events():
+		case state, ok := <-w.State():
 			if !ok {
 				return
 			}
-			if e.Err != nil {
-				m.logger.Error("error deserializing event", "key", e.Key, "err", e.Err)
-				e.Ack()
-				continue
-			}
-
-			username := e.Key
-			switch e.Change {
-			case anchor.ChangeSet:
-				if err := m.writeAuthorizedKeys(username, e.Value.Keys); err != nil {
+			for username, cfg := range state {
+				if err := m.writeAuthorizedKeys(username, cfg.Keys); err != nil {
 					m.logger.Error("failed to write authorized_keys", "username", username, "err", err)
 				} else {
-					m.logger.Info("updated authorized_keys", "username", username, "num_keys", len(e.Value.Keys))
+					m.logger.Info("updated authorized_keys", "username", username, "num_keys", len(cfg.Keys))
 				}
-			case anchor.ChangeDelete:
-				m.logger.Warn("refusing to remove all keys (delete event); to remove keys, set an explicit list instead", "username", username)
 			}
-			e.Ack()
 		}
 	}
 }
