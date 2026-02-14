@@ -14,10 +14,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var testRaftIndex atomic.Uint64
+// testEnv wraps a test FSM with a per-instance raft index counter.
+type testEnv struct {
+	*fsm
+	nextIndex atomic.Uint64
+}
 
-// testFSM creates a SQLite-backed FSM for testing.
-func testFSM(t *testing.T) *fsm {
+// newTestEnv creates a SQLite-backed FSM for testing.
+func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -36,10 +40,10 @@ func testFSM(t *testing.T) *fsm {
 	if err := f.initTable(); err != nil {
 		t.Fatal(err)
 	}
-	return f
+	return &testEnv{fsm: f}
 }
 
-func applySet(t *testing.T, f *fsm, kind, key string, value any) {
+func (e *testEnv) applySet(t *testing.T, kind, key string, value any) {
 	t.Helper()
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -50,31 +54,31 @@ func applySet(t *testing.T, f *fsm, kind, key string, value any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx := testRaftIndex.Add(1)
-	resp := f.Apply(&raft.Log{Index: idx, Data: b})
+	idx := e.nextIndex.Add(1)
+	resp := e.Apply(&raft.Log{Index: idx, Data: b})
 	if err, ok := resp.(error); ok {
 		t.Fatal(err)
 	}
 }
 
-func applyDelete(t *testing.T, f *fsm, kind, key string) {
+func (e *testEnv) applyDelete(t *testing.T, kind, key string) {
 	t.Helper()
 	cmd := Command{Type: CmdDelete, Kind: kind, Key: key}
 	b, err := json.Marshal(cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx := testRaftIndex.Add(1)
-	resp := f.Apply(&raft.Log{Index: idx, Data: b})
+	idx := e.nextIndex.Add(1)
+	resp := e.Apply(&raft.Log{Index: idx, Data: b})
 	if err, ok := resp.(error); ok {
 		t.Fatal(err)
 	}
 }
 
 func TestFSM_ApplySet(t *testing.T) {
-	f := testFSM(t)
+	f := newTestEnv(t)
 
-	applySet(t, f, "users", "alice", map[string]string{"role": "admin"})
+	f.applySet(t, "users", "alice", map[string]string{"role": "admin"})
 
 	raw, err := f.fsmGet("users", "alice")
 	if err != nil {
@@ -94,10 +98,10 @@ func TestFSM_ApplySet(t *testing.T) {
 }
 
 func TestFSM_ApplyOverwrite(t *testing.T) {
-	f := testFSM(t)
+	f := newTestEnv(t)
 
-	applySet(t, f, "users", "alice", map[string]string{"role": "viewer"})
-	applySet(t, f, "users", "alice", map[string]string{"role": "admin"})
+	f.applySet(t, "users", "alice", map[string]string{"role": "viewer"})
+	f.applySet(t, "users", "alice", map[string]string{"role": "admin"})
 
 	raw, err := f.fsmGet("users", "alice")
 	if err != nil {
@@ -114,10 +118,10 @@ func TestFSM_ApplyOverwrite(t *testing.T) {
 }
 
 func TestFSM_ApplyDelete(t *testing.T) {
-	f := testFSM(t)
+	f := newTestEnv(t)
 
-	applySet(t, f, "users", "alice", "hello")
-	applyDelete(t, f, "users", "alice")
+	f.applySet(t, "users", "alice", "hello")
+	f.applyDelete(t, "users", "alice")
 
 	raw, err := f.fsmGet("users", "alice")
 	if err != nil {
@@ -129,11 +133,11 @@ func TestFSM_ApplyDelete(t *testing.T) {
 }
 
 func TestFSM_List(t *testing.T) {
-	f := testFSM(t)
+	f := newTestEnv(t)
 
-	applySet(t, f, "servers", "web1", "10.0.0.1")
-	applySet(t, f, "servers", "web2", "10.0.0.2")
-	applySet(t, f, "other", "x", "unrelated")
+	f.applySet(t, "servers", "web1", "10.0.0.1")
+	f.applySet(t, "servers", "web2", "10.0.0.2")
+	f.applySet(t, "other", "x", "unrelated")
 
 	items, err := f.fsmList("servers")
 	if err != nil {
@@ -151,11 +155,11 @@ func TestFSM_List(t *testing.T) {
 }
 
 func TestFSM_SnapshotRestore(t *testing.T) {
-	f := testFSM(t)
+	f := newTestEnv(t)
 
-	applySet(t, f, "users", "alice", map[string]string{"role": "admin"})
-	applySet(t, f, "users", "bob", map[string]string{"role": "viewer"})
-	applySet(t, f, "servers", "web1", map[string]string{"ip": "10.0.0.1"})
+	f.applySet(t, "users", "alice", map[string]string{"role": "admin"})
+	f.applySet(t, "users", "bob", map[string]string{"role": "viewer"})
+	f.applySet(t, "servers", "web1", map[string]string{"ip": "10.0.0.1"})
 
 	// Take snapshot.
 	snap, err := f.Snapshot()
@@ -169,10 +173,10 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 	}
 
 	// Create a fresh FSM and restore into it.
-	f2 := testFSM(t)
+	f2 := newTestEnv(t)
 
 	// Put some data that should be wiped by restore.
-	applySet(t, f2, "users", "charlie", map[string]string{"role": "ghost"})
+	f2.applySet(t, "users", "charlie", map[string]string{"role": "ghost"})
 
 	if err := f2.Restore(io.NopCloser(&buf)); err != nil {
 		t.Fatal(err)
@@ -200,11 +204,11 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 }
 
 func TestFSM_SnapshotRestore_EventsAndCursors(t *testing.T) {
-	f := testFSM(t)
+	f := newTestEnv(t)
 
 	// Apply some entries to create events.
-	applySet(t, f, "users", "alice", "v1")
-	applySet(t, f, "users", "bob", "v2")
+	f.applySet(t, "users", "alice", "v1")
+	f.applySet(t, "users", "bob", "v2")
 
 	// Simulate a cursor (as if a watcher acked the first event).
 	_, err := f.db.Exec(
@@ -226,7 +230,7 @@ func TestFSM_SnapshotRestore_EventsAndCursors(t *testing.T) {
 	}
 
 	// Restore into a fresh FSM.
-	f2 := testFSM(t)
+	f2 := newTestEnv(t)
 	if err := f2.Restore(io.NopCloser(&buf)); err != nil {
 		t.Fatal(err)
 	}
