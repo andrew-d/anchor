@@ -589,6 +589,25 @@ func TestReconcile_SkipsUnmanagedUser(t *testing.T) {
 	}
 }
 
+// logRecord holds a captured slog record for test assertions.
+type logRecord struct {
+	Level   slog.Level
+	Message string
+}
+
+// recordHandler is a slog.Handler that captures log records for testing.
+type recordHandler struct {
+	records *[]logRecord
+}
+
+func (h *recordHandler) Enabled(context.Context, slog.Level) bool  { return true }
+func (h *recordHandler) WithAttrs([]slog.Attr) slog.Handler        { return h }
+func (h *recordHandler) WithGroup(string) slog.Handler              { return h }
+func (h *recordHandler) Handle(_ context.Context, r slog.Record) error {
+	*h.records = append(*h.records, logRecord{Level: r.Level, Message: r.Message})
+	return nil
+}
+
 func TestReconcile_WarnsOnDifferentDeployment(t *testing.T) {
 	homeBase := t.TempDir()
 
@@ -603,9 +622,14 @@ func TestReconcile_WarnsOnDifferentDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var records []logRecord
+	logger := slog.New(&recordHandler{records: &records})
+
 	m := reconcileTestModule(t, homeBase, []enumeratedUser{
 		{username: "bob", homeDir: bobHome},
 	})
+	m.logger = logger
+	m.problems = anchor.NewTestProblemReporter(logger)
 
 	withPass(t, m, func(pass *anchor.ProblemPass) {
 		m.reconcile(t.Context(), map[string]Config{}, pass)
@@ -618,6 +642,18 @@ func TestReconcile_WarnsOnDifferentDeployment(t *testing.T) {
 	}
 	if string(content) != akContent {
 		t.Fatalf("file from different deployment should be untouched, got:\n%s", string(content))
+	}
+
+	// Verify the warning was actually logged.
+	var found bool
+	for _, r := range records {
+		if r.Level == slog.LevelWarn && strings.Contains(r.Message, "different deployment") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected warning about different deployment, but none was logged")
 	}
 }
 
