@@ -20,7 +20,7 @@ func testApp(t *testing.T) *App {
 		Bootstrap:  true,
 	})
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := app.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestShutdown_WaitsForModuleGoroutines(t *testing.T) {
 	})
 	app.RegisterModule(mod)
 
-	if err := app.Start(context.Background()); err != nil {
+	if err := app.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,7 +67,7 @@ func TestShutdown_WaitsForModuleGoroutines(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := app.Shutdown(context.Background()); err != nil {
+	if err := app.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
