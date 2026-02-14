@@ -62,6 +62,7 @@ type App struct {
 	kinds        map[string]kindInfo
 	modules      []Module
 	deploymentID string
+	problems     *problemStore
 
 	httpServer *http.Server
 	httpAddr   string // actual bound address from listener
@@ -94,9 +95,10 @@ func New(config Config) *App {
 		logger = slog.Default()
 	}
 	return &App{
-		config: config,
-		kinds:  make(map[string]kindInfo),
-		logger: logger,
+		config:   config,
+		kinds:    make(map[string]kindInfo),
+		problems: newProblemStore(),
+		logger:   logger,
 	}
 }
 
@@ -127,6 +129,11 @@ func (a *App) HTTPAddrForTest() string {
 // It is auto-generated on first startup and stored in the local database.
 func (a *App) DeploymentID() string {
 	return a.deploymentID
+}
+
+// Problems returns all active problems reported by modules.
+func (a *App) Problems() []Problem {
+	return a.problems.all()
 }
 
 // Start initializes and starts the App. It blocks until the context is
@@ -200,9 +207,11 @@ func (a *App) Start(ctx context.Context) error {
 
 	// 3. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {
+		modLogger := a.logger.With("module", m.Name())
 		ic := InitContext{
-			App:    a,
-			Logger: a.logger.With("module", m.Name()),
+			App:      a,
+			Logger:   modLogger,
+			Problems: a.problems.reporter(m.Name(), modLogger),
 		}
 		if err := m.Init(a.ctx, ic); err != nil {
 			return fmt.Errorf("module %s init: %w", m.Name(), err)

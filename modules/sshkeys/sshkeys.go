@@ -57,6 +57,7 @@ type Module struct {
 
 	deploymentID string
 	logger       *slog.Logger
+	problems     *anchor.ProblemReporter
 	store        *anchor.TypedStore[Config]
 }
 
@@ -65,6 +66,7 @@ func (m *Module) Name() string { return "ssh_authorized_keys" }
 func (m *Module) Init(_ context.Context, ic anchor.InitContext) error {
 	m.deploymentID = ic.App.DeploymentID()
 	m.logger = ic.Logger
+	m.problems = ic.Problems
 	m.store = anchor.Register[Config](ic.App)
 
 	ic.Go(func(ctx context.Context) {
@@ -118,14 +120,18 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 			if !ok {
 				return
 			}
+			pass := m.problems.Begin()
 			for username, cfg := range state {
 				if err := m.writeAuthorizedKeys(username, cfg.Keys); err != nil {
-					m.logger.Error("failed to write authorized_keys", "username", username, "err", err)
+					pass.Error("write:"+username, "failed to write authorized_keys",
+						"username", username, "err", err)
 				} else {
-					m.logger.Info("updated authorized_keys", "username", username, "num_keys", len(cfg.Keys))
+					m.logger.Info("updated authorized_keys",
+						"username", username, "num_keys", len(cfg.Keys))
 				}
 			}
-			m.reconcile(state)
+			m.reconcile(state, pass)
+			pass.Commit()
 		}
 	}
 }
@@ -224,10 +230,10 @@ func (m *Module) revokeAuthorizedKeys(username, homeDir string) error {
 
 // reconcile enumerates system users and revokes anchor-managed
 // authorized_keys files for users not present in the current state.
-func (m *Module) reconcile(state map[string]Config) {
+func (m *Module) reconcile(state map[string]Config, pass *anchor.ProblemPass) {
 	users, err := m.enumerateUsers()
 	if err != nil {
-		m.logger.Error("failed to enumerate system users", "err", err)
+		pass.Error("enumerate_users", "failed to enumerate system users", "err", err)
 		return
 	}
 
@@ -239,7 +245,8 @@ func (m *Module) reconcile(state map[string]Config) {
 		akPath := filepath.Join(u.homeDir, ".ssh", "authorized_keys")
 		depID, err := readDeploymentID(akPath)
 		if err != nil {
-			m.logger.Error("failed to read deployment id", "username", u.username, "err", err)
+			pass.Error("read_deployment:"+u.username, "failed to read deployment id",
+				"username", u.username, "err", err)
 			continue
 		}
 		if depID == "" {
@@ -247,7 +254,7 @@ func (m *Module) reconcile(state map[string]Config) {
 			continue
 		}
 		if depID != m.deploymentID {
-			m.logger.Warn("authorized_keys managed by different deployment",
+			pass.Warn("different_deployment:"+u.username, "authorized_keys managed by different deployment",
 				"username", u.username,
 				"file_deployment_id", depID,
 				"our_deployment_id", m.deploymentID,
@@ -256,7 +263,8 @@ func (m *Module) reconcile(state map[string]Config) {
 		}
 
 		if err := m.revokeAuthorizedKeys(u.username, u.homeDir); err != nil {
-			m.logger.Error("failed to revoke authorized_keys", "username", u.username, "err", err)
+			pass.Error("revoke:"+u.username, "failed to revoke authorized_keys",
+				"username", u.username, "err", err)
 		} else {
 			m.logger.Info("revoked authorized_keys for removed user", "username", u.username)
 		}

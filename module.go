@@ -17,6 +17,10 @@ type InitContext struct {
 	// set to the module's name. Modules should store it and use it for all
 	// logging.
 	Logger *slog.Logger
+
+	// Problems is a [ProblemReporter] for this module. Use it to report
+	// active error and warning conditions during reconciliation passes.
+	Problems *ProblemReporter
 }
 
 // Go starts a background goroutine that is tracked by the App. During

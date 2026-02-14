@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andrew-d/anchor"
 )
 
 var fixedTime = time.Date(2026, 2, 12, 21, 30, 0, 0, time.UTC)
@@ -468,10 +470,18 @@ func reconcileTestModule(t *testing.T, homeBase string, users []enumeratedUser) 
 		deploymentID: "test-deploy",
 		nowFn:        func() time.Time { return fixedTime },
 		logger:       slog.Default(),
+		problems:     anchor.NewTestProblemReporter(slog.Default()),
 		enumerateUsersFn: func() ([]enumeratedUser, error) {
 			return users, nil
 		},
 	}
+}
+
+// withPass runs fn with a new ProblemPass and commits it afterward.
+func withPass(m *Module, fn func(pass *anchor.ProblemPass)) {
+	pass := m.problems.Begin()
+	fn(pass)
+	pass.Commit()
 }
 
 func TestReconcile_RevokesRemovedUser(t *testing.T) {
@@ -503,7 +513,9 @@ func TestReconcile_RevokesRemovedUser(t *testing.T) {
 	state := map[string]Config{
 		"alice": {Keys: []string{"ssh-rsa KEY"}},
 	}
-	m.reconcile(state)
+	withPass(m, func(pass *anchor.ProblemPass) {
+		m.reconcile(state, pass)
+	})
 
 	// Alice's file should be untouched.
 	aliceContent, err := os.ReadFile(filepath.Join(aliceHome, ".ssh", "authorized_keys"))
@@ -545,7 +557,9 @@ func TestReconcile_SkipsUnmanagedUser(t *testing.T) {
 		{username: "bob", homeDir: bobHome},
 	})
 
-	m.reconcile(map[string]Config{})
+	withPass(m, func(pass *anchor.ProblemPass) {
+		m.reconcile(map[string]Config{}, pass)
+	})
 
 	// Bob's file should be untouched.
 	content, err := os.ReadFile(filepath.Join(bobHome, ".ssh", "authorized_keys"))
@@ -575,7 +589,9 @@ func TestReconcile_WarnsOnDifferentDeployment(t *testing.T) {
 		{username: "bob", homeDir: bobHome},
 	})
 
-	m.reconcile(map[string]Config{})
+	withPass(m, func(pass *anchor.ProblemPass) {
+		m.reconcile(map[string]Config{}, pass)
+	})
 
 	// Bob's file should be untouched (different deployment).
 	content, err := os.ReadFile(filepath.Join(bobHome, ".ssh", "authorized_keys"))
@@ -600,7 +616,9 @@ func TestReconcile_SkipsUserWithNoFile(t *testing.T) {
 	})
 
 	// Should not panic or error — no authorized_keys file exists.
-	m.reconcile(map[string]Config{})
+	withPass(m, func(pass *anchor.ProblemPass) {
+		m.reconcile(map[string]Config{}, pass)
+	})
 
 	// Verify no file was created.
 	_, err := os.Stat(filepath.Join(bobHome, ".ssh", "authorized_keys"))
