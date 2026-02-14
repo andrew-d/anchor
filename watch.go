@@ -132,6 +132,15 @@ func (h *watchHub) unsubscribe(entry *watchEntry) {
 }
 
 // signal wakes all watchers for the given kind to re-read state.
+//
+// TODO: each watcher independently calls readFn, so N watchers for the same
+// kind run N identical fsmList queries. Options:
+//   - Per-kind generation cache: on signal, bump a gen counter; first watcher
+//     to read does the query and caches the raw result, others reuse it.
+//   - Hub pushes raw data: hub reads once on signal and broadcasts
+//     map[string]json.RawMessage to watchers, which deserialize independently.
+//   - singleflight on fsmList: deduplicates concurrent calls, but doesn't help
+//     if watchers wake up sequentially.
 func (h *watchHub) signal(kind string) {
 	h.mu.Lock()
 	es := slices.Clone(h.entries[kind])
