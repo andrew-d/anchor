@@ -2,6 +2,7 @@ package anchor
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -277,4 +278,101 @@ func TestWatcher_RedeliveryWithoutAck(t *testing.T) {
 	w2.Stop()
 }
 
+func TestWatcher_SpuriousSignal(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(db, slogt.New(t))
+	w := hub.subscribe("users", "spurious-test")
+	defer w.Stop()
 
+	// Insert event for a different kind and signal the watched kind.
+	insertEvent(t, db, 1, "servers", ChangeSet, "web1", `"ok"`)
+	hub.signal("users")
+
+	// No event should be delivered.
+	select {
+	case e := <-w.Events():
+		t.Fatalf("unexpected event: key=%q", e.Key)
+	case <-time.After(200 * time.Millisecond):
+		// Expected: no delivery.
+	}
+}
+
+func TestWatcher_ConcurrentDifferentNames(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(db, slogt.New(t))
+	w1 := hub.subscribe("users", "concurrent-a")
+	defer w1.Stop()
+	w2 := hub.subscribe("users", "concurrent-b")
+	defer w2.Stop()
+
+	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
+	hub.signal("users")
+
+	// Both watchers should independently receive the same event.
+	for _, w := range []*Watcher{w1, w2} {
+		select {
+		case e := <-w.Events():
+			if e.Key != "alice" {
+				t.Fatalf("expected key=alice, got %q", e.Key)
+			}
+			e.Ack()
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for event on watcher %s", w.name)
+		}
+	}
+}
+
+func TestWatcher_StopDuringAckWait(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(db, slogt.New(t))
+	w := hub.subscribe("users", "stop-ack-test")
+
+	insertEvent(t, db, 1, "users", ChangeSet, "alice", `"v1"`)
+	hub.signal("users")
+
+	// Receive the event but don't ack.
+	select {
+	case <-w.Events():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+
+	// Stop while drain is waiting for ack. Should not hang.
+	done := make(chan struct{})
+	go func() {
+		w.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() blocked during ack wait")
+	}
+}
+
+func TestWatcher_Backlog(t *testing.T) {
+	db := testWatchDB(t)
+	hub := newWatchHub(db, slogt.New(t))
+	w := hub.subscribe("users", "backlog-test")
+	defer w.Stop()
+
+	// Insert many events, signal once.
+	for i := range 20 {
+		insertEvent(t, db, int64(i+1), "users", ChangeSet, fmt.Sprintf("key-%d", i), `"v"`)
+	}
+	hub.signal("users")
+
+	// Drain all 20, acking each before receiving the next.
+	for i := range 20 {
+		select {
+		case e := <-w.Events():
+			expected := fmt.Sprintf("key-%d", i)
+			if e.Key != expected {
+				t.Fatalf("event %d: expected key=%q, got %q", i, expected, e.Key)
+			}
+			e.Ack()
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for event %d", i)
+		}
+	}
+}

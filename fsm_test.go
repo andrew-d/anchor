@@ -199,6 +199,59 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 	}
 }
 
+func TestFSM_SnapshotRestore_EventsAndCursors(t *testing.T) {
+	f := testFSM(t)
+
+	// Apply some entries to create events.
+	applySet(t, f, "users", "alice", "v1")
+	applySet(t, f, "users", "bob", "v2")
+
+	// Simulate a cursor (as if a watcher acked the first event).
+	_, err := f.db.Exec(
+		`INSERT INTO fsm_cursors(name, pos) VALUES(?, ?)`,
+		"test-watcher", 1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Take snapshot.
+	snap, err := f.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&memSink{buf: &buf}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore into a fresh FSM.
+	f2 := testFSM(t)
+	if err := f2.Restore(io.NopCloser(&buf)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify events survived the restore.
+	var eventCount int
+	if err := f2.db.QueryRow(`SELECT COUNT(*) FROM fsm_events`).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if eventCount < 1 {
+		t.Fatal("expected events after restore, got 0")
+	}
+
+	// Verify cursor survived the restore.
+	var pos int64
+	if err := f2.db.QueryRow(
+		`SELECT pos FROM fsm_cursors WHERE name = ?`, "test-watcher",
+	).Scan(&pos); err != nil {
+		t.Fatal(err)
+	}
+	if pos != 1 {
+		t.Fatalf("expected cursor pos=1, got %d", pos)
+	}
+}
+
 // memSink is a minimal raft.SnapshotSink backed by a buffer.
 type memSink struct {
 	buf *bytes.Buffer
