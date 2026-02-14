@@ -3,7 +3,9 @@ package anchor
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -53,12 +55,13 @@ type Config struct {
 // App is the central coordinator. It wires together Raft, the FSM, the HTTP
 // API, and user-defined modules.
 type App struct {
-	config  Config
-	db      *sql.DB
-	raft    *raft.Raft
-	watches *watchHub
-	kinds   map[string]kindInfo
-	modules []Module
+	config       Config
+	db           *sql.DB
+	raft         *raft.Raft
+	watches      *watchHub
+	kinds        map[string]kindInfo
+	modules      []Module
+	deploymentID string
 
 	httpServer *http.Server
 	httpAddr   string // actual bound address from listener
@@ -120,6 +123,12 @@ func (a *App) HTTPAddrForTest() string {
 	return a.httpAddr
 }
 
+// DeploymentID returns a persistent identifier for this anchor deployment.
+// It is auto-generated on first startup and stored in the local database.
+func (a *App) DeploymentID() string {
+	return a.deploymentID
+}
+
 // Start initializes and starts the App. It blocks until the context is
 // canceled or an error occurs during startup.
 func (a *App) Start(ctx context.Context) error {
@@ -148,6 +157,14 @@ func (a *App) Start(ctx context.Context) error {
 			return fmt.Errorf("set pragma %q: %w", p, err)
 		}
 	}
+
+	// Read or generate deployment ID inside a transaction.
+	depID, err := readOrGenerateDeploymentID(db)
+	if err != nil {
+		return fmt.Errorf("deployment id: %w", err)
+	}
+	a.deploymentID = depID
+	a.logger.Info("deployment id", "deployment_id", depID)
 
 	// 2. Create TxFactory and initialize raft-sqlite stores.
 	txFactory := func(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
@@ -350,6 +367,40 @@ const nodeMetaKind = "_node_meta"
 
 type nodeMetaValue struct {
 	HTTPAddr string `json:"http_addr"`
+}
+
+// readOrGenerateDeploymentID creates the anchor_meta table if needed, then
+// reads or generates the deployment ID in a single transaction.
+func readOrGenerateDeploymentID(db *sql.DB) (string, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return "", fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS anchor_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		return "", fmt.Errorf("create anchor_meta table: %w", err)
+	}
+
+	var depID string
+	err = tx.QueryRow(`SELECT value FROM anchor_meta WHERE key = 'deployment_id'`).Scan(&depID)
+	if err == sql.ErrNoRows {
+		var b [16]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return "", fmt.Errorf("generate random bytes: %w", err)
+		}
+		depID = hex.EncodeToString(b[:])
+		if _, err := tx.Exec(`INSERT INTO anchor_meta(key, value) VALUES('deployment_id', ?)`, depID); err != nil {
+			return "", fmt.Errorf("store deployment id: %w", err)
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("read deployment id: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit: %w", err)
+	}
+	return depID, nil
 }
 
 // leaderHTTPAddr returns the HTTP address of the current leader.
