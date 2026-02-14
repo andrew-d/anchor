@@ -114,6 +114,43 @@ func TestWriteAuthorizedKeys_Overwrite(t *testing.T) {
 	}
 }
 
+func TestWriteAuthorizedKeys_SkipsUnchanged(t *testing.T) {
+	m, homeBase := testModule(t)
+	createUserHome(t, homeBase, "frank")
+
+	if err := m.writeAuthorizedKeys("frank", []string{"ssh-rsa KEY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(homeBase, "frank", ".ssh", "authorized_keys")
+	info1, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Advance time so a rewrite would produce a different timestamp.
+	m.nowFn = func() time.Time { return fixedTime.Add(time.Hour) }
+
+	// Write the same keys again.
+	if err := m.writeAuthorizedKeys("frank", []string{"ssh-rsa KEY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	info2, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info2.ModTime() != info1.ModTime() {
+		t.Fatal("file was rewritten despite identical keys")
+	}
+
+	// Verify the old timestamp is preserved (not updated to the new time).
+	content := readAuthorizedKeys(t, homeBase, "frank")
+	if !strings.Contains(content, "2026-02-12T21:30:00Z") {
+		t.Fatalf("expected original timestamp, got:\n%s", content)
+	}
+}
+
 func TestWriteAuthorizedKeys_RefusesEmptyKeys(t *testing.T) {
 	m, homeBase := testModule(t)
 	createUserHome(t, homeBase, "bob")
@@ -283,6 +320,44 @@ func TestDeduplicateAndSort(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Fatalf("index %d: got %q, want %q", i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestExtractKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "with header",
+			content: "# Managed by anchor\n# Deployment: abc\n# Last updated: 2026-01-01T00:00:00Z\nssh-rsa KEY1\nssh-rsa KEY2\n",
+			want:    "ssh-rsa KEY1\nssh-rsa KEY2\n",
+		},
+		{
+			name:    "no header",
+			content: "ssh-rsa KEY1\n",
+			want:    "ssh-rsa KEY1\n",
+		},
+		{
+			name:    "only header",
+			content: "# comment only\n",
+			want:    "",
+		},
+		{
+			name:    "empty",
+			content: "",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractKeys(tt.content)
+			if got != tt.want {
+				t.Fatalf("extractKeys() = %q, want %q", got, tt.want)
 			}
 		})
 	}

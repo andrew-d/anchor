@@ -158,10 +158,19 @@ func (m *Module) writeAuthorizedKeys(username string, keys []string) error {
 	}
 
 	path := filepath.Join(sshDir, "authorized_keys")
-	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: %s\n# Last updated: %s\n%s\n",
+
+	// Skip the write if the key lines on disk already match. This avoids
+	// redundant disk writes (and mtime changes) when the watcher delivers
+	// state that hasn't changed for this user.
+	keyBlock := strings.Join(keys, "\n") + "\n"
+	if existing, err := os.ReadFile(path); err == nil && extractKeys(string(existing)) == keyBlock {
+		return nil
+	}
+
+	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: %s\n# Last updated: %s\n%s",
 		m.deploymentID,
 		m.now().UTC().Format(time.RFC3339),
-		strings.Join(keys, "\n"),
+		keyBlock,
 	)
 
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -252,6 +261,24 @@ func (m *Module) reconcile(state map[string]Config) {
 			m.logger.Info("revoked authorized_keys for removed user", "username", u.username)
 		}
 	}
+}
+
+// extractKeys returns everything after the header comment lines in an
+// authorized_keys file. This is used to compare key content without being
+// affected by timestamp changes in the header.
+func extractKeys(content string) string {
+	var i int
+	for i < len(content) {
+		if content[i] != '#' {
+			break
+		}
+		nl := strings.IndexByte(content[i:], '\n')
+		if nl < 0 {
+			return ""
+		}
+		i += nl + 1
+	}
+	return content[i:]
 }
 
 // deduplicateAndSort removes duplicate keys and sorts the result for stable output.
