@@ -125,9 +125,10 @@ type snapshotCursor struct {
 	Pos  int64  `json:"pos"`
 }
 
-// Snapshot returns a snapshot of the FSM state. All three tables are read
-// inside a single transaction so the snapshot is self-consistent.
+// Snapshot returns a snapshot of the FSM state.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
+	// NOTE: All three tables are read inside a single transaction so the
+	// snapshot is self-consistent.
 	tx, err := f.db.Begin()
 	if err != nil {
 		return nil, err
