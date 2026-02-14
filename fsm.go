@@ -97,35 +97,92 @@ func (f *fsm) Apply(l *raft.Log) any {
 	return nil
 }
 
-// snapshotEntry is one row of the FSM state, serialized in a snapshot.
-type snapshotEntry struct {
+// snapshotData is the top-level structure serialized in a snapshot. It
+// includes all FSM tables so that events and cursor positions survive
+// snapshot + log truncation.
+type snapshotData struct {
+	KV      []snapshotKV     `json:"kv"`
+	Events  []snapshotEvent  `json:"events"`
+	Cursors []snapshotCursor `json:"cursors"`
+}
+
+type snapshotKV struct {
 	Kind  string          `json:"kind"`
 	Key   string          `json:"key"`
 	Value json.RawMessage `json:"value"`
 }
 
+type snapshotEvent struct {
+	RaftIndex int64  `json:"raft_index"`
+	Kind      string `json:"kind"`
+	Change    int    `json:"change"`
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+}
+
+type snapshotCursor struct {
+	Name string `json:"name"`
+	Pos  int64  `json:"pos"`
+}
+
 // Snapshot returns a snapshot of the FSM state.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
-	rows, err := f.db.Query(`SELECT kind, key, value FROM fsm_kv`)
+	var data snapshotData
+
+	// KV entries.
+	kvRows, err := f.db.Query(`SELECT kind, key, value FROM fsm_kv`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var entries []snapshotEntry
-	for rows.Next() {
-		var e snapshotEntry
+	defer kvRows.Close()
+	for kvRows.Next() {
+		var e snapshotKV
 		var val string
-		if err := rows.Scan(&e.Kind, &e.Key, &val); err != nil {
+		if err := kvRows.Scan(&e.Kind, &e.Key, &val); err != nil {
 			return nil, err
 		}
 		e.Value = json.RawMessage(val)
-		entries = append(entries, e)
+		data.KV = append(data.KV, e)
 	}
-	if err := rows.Err(); err != nil {
+	if err := kvRows.Err(); err != nil {
 		return nil, err
 	}
-	return &fsmSnapshot{entries: entries}, nil
+
+	// Events.
+	eventRows, err := f.db.Query(`SELECT raft_index, kind, change, key, value FROM fsm_events`)
+	if err != nil {
+		return nil, err
+	}
+	defer eventRows.Close()
+	for eventRows.Next() {
+		var e snapshotEvent
+		if err := eventRows.Scan(&e.RaftIndex, &e.Kind, &e.Change, &e.Key, &e.Value); err != nil {
+			return nil, err
+		}
+		data.Events = append(data.Events, e)
+	}
+	if err := eventRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Cursors.
+	cursorRows, err := f.db.Query(`SELECT name, pos FROM fsm_cursors`)
+	if err != nil {
+		return nil, err
+	}
+	defer cursorRows.Close()
+	for cursorRows.Next() {
+		var c snapshotCursor
+		if err := cursorRows.Scan(&c.Name, &c.Pos); err != nil {
+			return nil, err
+		}
+		data.Cursors = append(data.Cursors, c)
+	}
+	if err := cursorRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &fsmSnapshot{data: data}, nil
 }
 
 // Restore replaces all FSM state from a snapshot. Raft guarantees this is
@@ -133,8 +190,8 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 func (f *fsm) Restore(rc io.ReadCloser) error {
 	defer rc.Close()
 
-	var entries []snapshotEntry
-	if err := json.NewDecoder(rc).Decode(&entries); err != nil {
+	var data snapshotData
+	if err := json.NewDecoder(rc).Decode(&data); err != nil {
 		return err
 	}
 
@@ -154,14 +211,21 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)`)
-	if err != nil {
-		return err
+	for _, e := range data.KV {
+		if _, err := tx.Exec(`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)`,
+			e.Kind, e.Key, string(e.Value)); err != nil {
+			return err
+		}
 	}
-	defer stmt.Close()
-
-	for _, e := range entries {
-		if _, err := stmt.Exec(e.Kind, e.Key, string(e.Value)); err != nil {
+	for _, e := range data.Events {
+		if _, err := tx.Exec(`INSERT INTO fsm_events (raft_index, kind, change, key, value) VALUES (?, ?, ?, ?, ?)`,
+			e.RaftIndex, e.Kind, e.Change, e.Key, e.Value); err != nil {
+			return err
+		}
+	}
+	for _, c := range data.Cursors {
+		if _, err := tx.Exec(`INSERT INTO fsm_cursors (name, pos) VALUES (?, ?)`,
+			c.Name, c.Pos); err != nil {
 			return err
 		}
 	}
@@ -207,12 +271,12 @@ func (f *fsm) fsmList(kind string) (map[string]json.RawMessage, error) {
 }
 
 type fsmSnapshot struct {
-	entries []snapshotEntry
+	data snapshotData
 }
 
 func (s *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	err := func() error {
-		b, err := json.Marshal(s.entries)
+		b, err := json.Marshal(s.data)
 		if err != nil {
 			return err
 		}
