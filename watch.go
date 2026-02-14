@@ -1,12 +1,14 @@
 package anchor
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 )
 
 // ChangeType identifies the kind of mutation that occurred.
@@ -176,13 +178,6 @@ func (w *Watcher[T]) drain() {
 			return
 		}
 
-		// Compact events that all subscribers have processed.
-		_, err = w.hub.db.Exec(
-			`DELETE FROM fsm_events WHERE raft_index <= (SELECT MIN(pos) FROM fsm_cursors)`,
-		)
-		if err != nil {
-			w.hub.logger.Error("failed to compact events", "watcher", w.entry.name, "err", err)
-		}
 	}
 }
 
@@ -235,6 +230,26 @@ func (h *watchHub) unsubscribe(entry *watchEntry) {
 		if e == entry {
 			h.entries[entry.kind] = append(es[:i], es[i+1:]...)
 			break
+		}
+	}
+}
+
+// compact periodically deletes events that all subscribers have processed.
+// It runs until ctx is canceled.
+func (h *watchHub) compact(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, err := h.db.Exec(
+				`DELETE FROM fsm_events WHERE raft_index <= (SELECT MIN(pos) FROM fsm_cursors)`,
+			)
+			if err != nil {
+				h.logger.Error("failed to compact events", "err", err)
+			}
 		}
 	}
 }
