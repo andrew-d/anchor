@@ -2,6 +2,7 @@ package anchor
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -32,7 +33,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	logger := slogt.New(t)
 	app := &App{
 		db:      db,
-		watches: newWatchHub(logger),
+		watches: newWatchHub(context.Background(), logger),
 		kinds:   make(map[string]kindInfo),
 		logger:  logger,
 	}

@@ -31,7 +31,7 @@ type Watcher[T any] struct {
 }
 
 func newWatcher[T any](hub *watchHub, entry *watchEntry, readFn func() (T, error)) *Watcher[T] {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(hub.ctx)
 	w := &Watcher[T]{
 		readFn:  readFn,
 		entry:   entry,
@@ -93,14 +93,16 @@ func (w *Watcher[T]) loop() {
 
 // watchHub manages all watchers, keyed by kind.
 type watchHub struct {
+	ctx     context.Context
 	mu      sync.Mutex
 	entries map[string][]*watchEntry
 
 	logger *slog.Logger
 }
 
-func newWatchHub(logger *slog.Logger) *watchHub {
+func newWatchHub(ctx context.Context, logger *slog.Logger) *watchHub {
 	return &watchHub{
+		ctx:     ctx,
 		entries: make(map[string][]*watchEntry),
 		logger:  logger,
 	}

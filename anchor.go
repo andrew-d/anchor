@@ -196,7 +196,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	// Create the watch hub before modules init so watchers started during
 	// Init can subscribe immediately.
-	a.watches = newWatchHub(a.logger)
+	a.watches = newWatchHub(a.ctx, a.logger)
 
 	// 3. Init modules (they register kinds via Register[T]).
 	for _, m := range a.modules {

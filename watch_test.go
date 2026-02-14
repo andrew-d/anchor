@@ -1,6 +1,7 @@
 package anchor
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
@@ -100,7 +101,7 @@ func testKeyWatcher(hub *watchHub, db *sql.DB, kind, key string) *Watcher[json.R
 
 func TestWatcher_InitialDelivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	insertKV(t, db, "users", "alice", `{"role":"admin"}`)
 
@@ -122,7 +123,7 @@ func TestWatcher_InitialDelivery(t *testing.T) {
 
 func TestWatcher_DeliveryAfterSignal(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
@@ -156,7 +157,7 @@ func TestWatcher_DeliveryAfterSignal(t *testing.T) {
 
 func TestWatcher_KindFiltering(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
@@ -183,7 +184,7 @@ func TestWatcher_KindFiltering(t *testing.T) {
 
 func TestWatcher_Stop(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	w := testStoreWatcher(hub, db, "users")
 	w.Stop()
@@ -209,7 +210,7 @@ func TestWatcher_Stop(t *testing.T) {
 
 func TestWatcher_StopDuringBlockedDelivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	insertKV(t, db, "users", "alice", `"v1"`)
 	w := testStoreWatcher(hub, db, "users")
@@ -230,7 +231,7 @@ func TestWatcher_StopDuringBlockedDelivery(t *testing.T) {
 
 func TestWatcher_MultipleConcurrent(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	insertKV(t, db, "users", "alice", `"v1"`)
 
@@ -254,7 +255,7 @@ func TestWatcher_MultipleConcurrent(t *testing.T) {
 
 func TestWatcher_EmptyState(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
@@ -271,7 +272,7 @@ func TestWatcher_EmptyState(t *testing.T) {
 
 func TestWatcher_WatchKey(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	insertKV(t, db, "motd", "default", `"Hello, world!"`)
 
@@ -290,7 +291,7 @@ func TestWatcher_WatchKey(t *testing.T) {
 
 func TestWatcher_WatchKeyMissing(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	w := testKeyWatcher(hub, db, "motd", "default")
 	defer w.Stop()
@@ -307,7 +308,7 @@ func TestWatcher_WatchKeyMissing(t *testing.T) {
 
 func TestWatcher_SignalAll(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(slogt.New(t))
+	hub := newWatchHub(context.Background(), slogt.New(t))
 
 	w1 := testStoreWatcher(hub, db, "users")
 	defer w1.Stop()
