@@ -3,6 +3,7 @@ package anchor
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -70,6 +71,7 @@ func (w *Watcher) Events() <-chan Event {
 func (w *Watcher) Stop() {
 	close(w.done)
 	<-w.stopped
+	w.hub.unsubscribe(w)
 }
 
 // drain reads events from the database and delivers them one at a time.
@@ -154,6 +156,7 @@ func (w *Watcher) drain() {
 type watchHub struct {
 	mu       sync.Mutex
 	watchers map[string][]*Watcher
+	names    map[string]bool // active watcher names (must be unique)
 
 	db     *sql.DB
 	logger *slog.Logger
@@ -162,11 +165,15 @@ type watchHub struct {
 func newWatchHub(db *sql.DB, logger *slog.Logger) *watchHub {
 	return &watchHub{
 		watchers: make(map[string][]*Watcher),
+		names:    make(map[string]bool),
 		db:       db,
 		logger:   logger,
 	}
 }
 
+// subscribe creates a new watcher for the given kind with a unique subscriber
+// name. It panics if a watcher with the same name already exists, since two
+// watchers sharing a cursor row would corrupt each other's positions.
 func (h *watchHub) subscribe(kind, name string) *Watcher {
 	w := &Watcher{
 		kind:    kind,
@@ -178,10 +185,29 @@ func (h *watchHub) subscribe(kind, name string) *Watcher {
 		stopped: make(chan struct{}),
 	}
 	h.mu.Lock()
+	if h.names[name] {
+		h.mu.Unlock()
+		panic(fmt.Sprintf("anchor: duplicate watcher name %q", name))
+	}
+	h.names[name] = true
 	h.watchers[kind] = append(h.watchers[kind], w)
 	h.mu.Unlock()
 	go w.drain()
 	return w
+}
+
+// unsubscribe removes a watcher from the hub, freeing its name for reuse.
+func (h *watchHub) unsubscribe(w *Watcher) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.names, w.name)
+	ws := h.watchers[w.kind]
+	for i, ww := range ws {
+		if ww == w {
+			h.watchers[w.kind] = append(ws[:i], ws[i+1:]...)
+			break
+		}
+	}
 }
 
 // signal wakes all watchers for the given kind to check for new events.
