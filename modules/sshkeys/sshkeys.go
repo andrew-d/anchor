@@ -98,7 +98,11 @@ func (m *Module) enumerateUsers(ctx context.Context) ([]enumeratedUser, error) {
 	if m.enumerateUsersFn != nil {
 		return m.enumerateUsersFn(ctx)
 	}
-	return enumerateSystemUsers(ctx)
+	users, getentErr, err := enumerateSystemUsers(ctx)
+	if getentErr != nil && err == nil {
+		m.logger.Warn("getent passwd failed, fell back to /etc/passwd", "err", getentErr)
+	}
+	return users, err
 }
 
 func (m *Module) now() time.Time {

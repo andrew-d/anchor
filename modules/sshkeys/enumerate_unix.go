@@ -21,13 +21,15 @@ type enumeratedUser struct {
 const getentTimeout = 30 * time.Second
 
 // enumerateSystemUsers returns all system users by trying getent first,
-// then falling back to parsing /etc/passwd directly.
-func enumerateSystemUsers(ctx context.Context) ([]enumeratedUser, error) {
-	users, err := enumerateViaGetent(ctx)
-	if err == nil {
-		return users, nil
+// then falling back to parsing /etc/passwd directly. If getent fails,
+// getentErr is non-nil so the caller can log it.
+func enumerateSystemUsers(ctx context.Context) (users []enumeratedUser, getentErr error, err error) {
+	users, getentErr = enumerateViaGetent(ctx)
+	if getentErr == nil {
+		return users, nil, nil
 	}
-	return enumerateViaPasswdFile("/etc/passwd")
+	users, err = enumerateViaPasswdFile("/etc/passwd")
+	return users, getentErr, err
 }
 
 // enumerateViaGetent runs "getent passwd" and parses the output.
