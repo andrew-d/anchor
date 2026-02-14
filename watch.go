@@ -60,11 +60,12 @@ type watchEntry struct {
 // SQLite one at a time, delivers each on the output channel, and waits for an
 // Ack before advancing the cursor.
 type Watcher[T any] struct {
-	entry   *watchEntry
-	hub     *watchHub
-	out     chan Event[T]
-	done    chan struct{}
-	stopped chan struct{} // closed when drain exits
+	entry    *watchEntry
+	hub      *watchHub
+	out      chan Event[T]
+	done     chan struct{}
+	stopped  chan struct{} // closed when drain exits
+	stopOnce sync.Once
 }
 
 func newWatcher[T any](hub *watchHub, entry *watchEntry) *Watcher[T] {
@@ -87,9 +88,11 @@ func (w *Watcher[T]) Events() <-chan Event[T] {
 // Stop stops the watcher and waits for the drain goroutine to exit. The
 // events channel will be closed.
 func (w *Watcher[T]) Stop() {
-	close(w.done)
-	<-w.stopped
-	w.hub.unsubscribe(w.entry)
+	w.stopOnce.Do(func() {
+		close(w.done)
+		<-w.stopped
+		w.hub.unsubscribe(w.entry)
+	})
 }
 
 // drain reads events from the database, deserializes them, and delivers them
