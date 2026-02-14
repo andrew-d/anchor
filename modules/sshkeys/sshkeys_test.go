@@ -2,6 +2,7 @@ package sshkeys
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,8 @@ func testModule(t *testing.T) (*Module, string) {
 				gid:     gid,
 			}, nil
 		},
-		nowFn: func() time.Time { return fixedTime },
+		nowFn:        func() time.Time { return fixedTime },
+		deploymentID: "test-deploy",
 	}
 	return m, homeBase
 }
@@ -64,6 +66,7 @@ func TestWriteAuthorizedKeys(t *testing.T) {
 
 	// Keys should be sorted.
 	expected := "# Managed by anchor - do not edit manually\n" +
+		"# Deployment: test-deploy\n" +
 		"# Last updated: 2026-02-12T21:30:00Z\n" +
 		"ssh-ed25519 AAAA2\n" +
 		"ssh-rsa AAAA1\n"
@@ -312,5 +315,221 @@ func TestWriteAuthorizedKeys_DuplicateKeysDeduped(t *testing.T) {
 	count := strings.Count(content, "ssh-rsa AAA")
 	if count != 1 {
 		t.Fatalf("expected ssh-rsa AAA to appear once, appeared %d times:\n%s", count, content)
+	}
+}
+
+func TestParseDeploymentID(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "anchor file with deployment ID",
+			content: "# Managed by anchor - do not edit manually\n# Deployment: abc123\n# Last updated: 2026-02-12T21:30:00Z\nssh-rsa KEY\n",
+			want:    "abc123",
+		},
+		{
+			name:    "anchor file without deployment ID",
+			content: "# Managed by anchor - do not edit manually\n# Last updated: 2026-02-12T21:30:00Z\nssh-rsa KEY\n",
+			want:    "",
+		},
+		{
+			name:    "non-anchor file",
+			content: "ssh-rsa KEY\n",
+			want:    "",
+		},
+		{
+			name:    "empty file",
+			content: "",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDeploymentID(tt.content)
+			if got != tt.want {
+				t.Fatalf("parseDeploymentID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRevokeAuthorizedKeys(t *testing.T) {
+	m, homeBase := testModule(t)
+	createUserHome(t, homeBase, "alice")
+
+	// Write keys first.
+	if err := m.writeAuthorizedKeys("alice", []string{"ssh-rsa KEY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Revoke.
+	aliceHome := filepath.Join(homeBase, "alice")
+	if err := m.revokeAuthorizedKeys("alice", aliceHome); err != nil {
+		t.Fatal(err)
+	}
+
+	content := readAuthorizedKeys(t, homeBase, "alice")
+	if !strings.Contains(content, "# Managed by anchor") {
+		t.Fatalf("expected header, got:\n%s", content)
+	}
+	if !strings.Contains(content, "# Deployment: test-deploy") {
+		t.Fatalf("expected deployment header, got:\n%s", content)
+	}
+	if !strings.Contains(content, "# Keys revoked") {
+		t.Fatalf("expected revocation comment, got:\n%s", content)
+	}
+	if strings.Contains(content, "ssh-rsa KEY") {
+		t.Fatalf("key should have been removed, got:\n%s", content)
+	}
+}
+
+// reconcileTestModule creates a Module with test hooks for reconciliation tests.
+func reconcileTestModule(t *testing.T, homeBase string, users []enumeratedUser) *Module {
+	t.Helper()
+	return &Module{
+		deploymentID: "test-deploy",
+		nowFn:        func() time.Time { return fixedTime },
+		logger:       slog.Default(),
+		enumerateUsersFn: func() ([]enumeratedUser, error) {
+			return users, nil
+		},
+	}
+}
+
+func TestReconcile_RevokesRemovedUser(t *testing.T) {
+	homeBase := t.TempDir()
+
+	aliceHome := filepath.Join(homeBase, "alice")
+	bobHome := filepath.Join(homeBase, "bob")
+	for _, dir := range []string{aliceHome, bobHome} {
+		if err := os.MkdirAll(filepath.Join(dir, ".ssh"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := reconcileTestModule(t, homeBase, []enumeratedUser{
+		{username: "alice", homeDir: aliceHome},
+		{username: "bob", homeDir: bobHome},
+	})
+
+	// Write anchor-managed keys for both users.
+	akContent := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: test-deploy\n# Last updated: %s\nssh-rsa KEY\n",
+		fixedTime.UTC().Format(time.RFC3339))
+	for _, home := range []string{aliceHome, bobHome} {
+		if err := os.WriteFile(filepath.Join(home, ".ssh", "authorized_keys"), []byte(akContent), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// State only has alice; bob should be revoked.
+	state := map[string]Config{
+		"alice": {Keys: []string{"ssh-rsa KEY"}},
+	}
+	m.reconcile(state)
+
+	// Alice's file should be untouched.
+	aliceContent, err := os.ReadFile(filepath.Join(aliceHome, ".ssh", "authorized_keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(aliceContent), "ssh-rsa KEY") {
+		t.Fatalf("alice's keys should be untouched, got:\n%s", string(aliceContent))
+	}
+
+	// Bob's file should be revoked (no keys, has revocation comment).
+	bobContent, err := os.ReadFile(filepath.Join(bobHome, ".ssh", "authorized_keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bobContent), "ssh-rsa KEY") {
+		t.Fatalf("bob's keys should be revoked, got:\n%s", string(bobContent))
+	}
+	if !strings.Contains(string(bobContent), "# Keys revoked") {
+		t.Fatalf("expected revocation comment, got:\n%s", string(bobContent))
+	}
+}
+
+func TestReconcile_SkipsUnmanagedUser(t *testing.T) {
+	homeBase := t.TempDir()
+
+	bobHome := filepath.Join(homeBase, "bob")
+	if err := os.MkdirAll(filepath.Join(bobHome, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a non-anchor authorized_keys file.
+	original := "ssh-rsa MANUAL_KEY\n"
+	if err := os.WriteFile(filepath.Join(bobHome, ".ssh", "authorized_keys"), []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := reconcileTestModule(t, homeBase, []enumeratedUser{
+		{username: "bob", homeDir: bobHome},
+	})
+
+	m.reconcile(map[string]Config{})
+
+	// Bob's file should be untouched.
+	content, err := os.ReadFile(filepath.Join(bobHome, ".ssh", "authorized_keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != original {
+		t.Fatalf("unmanaged file should be untouched, got:\n%s", string(content))
+	}
+}
+
+func TestReconcile_WarnsOnDifferentDeployment(t *testing.T) {
+	homeBase := t.TempDir()
+
+	bobHome := filepath.Join(homeBase, "bob")
+	if err := os.MkdirAll(filepath.Join(bobHome, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write an anchor-managed file with a different deployment ID.
+	akContent := "# Managed by anchor - do not edit manually\n# Deployment: other-deploy\n# Last updated: 2026-02-12T21:30:00Z\nssh-rsa KEY\n"
+	if err := os.WriteFile(filepath.Join(bobHome, ".ssh", "authorized_keys"), []byte(akContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := reconcileTestModule(t, homeBase, []enumeratedUser{
+		{username: "bob", homeDir: bobHome},
+	})
+
+	m.reconcile(map[string]Config{})
+
+	// Bob's file should be untouched (different deployment).
+	content, err := os.ReadFile(filepath.Join(bobHome, ".ssh", "authorized_keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != akContent {
+		t.Fatalf("file from different deployment should be untouched, got:\n%s", string(content))
+	}
+}
+
+func TestReconcile_SkipsUserWithNoFile(t *testing.T) {
+	homeBase := t.TempDir()
+
+	bobHome := filepath.Join(homeBase, "bob")
+	if err := os.MkdirAll(bobHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := reconcileTestModule(t, homeBase, []enumeratedUser{
+		{username: "bob", homeDir: bobHome},
+	})
+
+	// Should not panic or error — no authorized_keys file exists.
+	m.reconcile(map[string]Config{})
+
+	// Verify no file was created.
+	_, err := os.Stat(filepath.Join(bobHome, ".ssh", "authorized_keys"))
+	if err == nil {
+		t.Fatal("no authorized_keys file should have been created")
 	}
 }

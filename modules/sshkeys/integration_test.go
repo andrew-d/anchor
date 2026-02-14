@@ -67,6 +67,9 @@ func TestIntegration_SSHKeysWrittenToDisk(t *testing.T) {
 	if !strings.HasPrefix(content, "# Managed by anchor") {
 		t.Fatalf("missing header comment:\n%s", content)
 	}
+	if !strings.Contains(content, "# Deployment:") {
+		t.Fatalf("missing deployment comment:\n%s", content)
+	}
 	if !strings.Contains(content, "# Last updated:") {
 		t.Fatalf("missing timestamp comment:\n%s", content)
 	}

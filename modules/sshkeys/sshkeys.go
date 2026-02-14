@@ -48,16 +48,22 @@ type Module struct {
 	// If nil, defaults to os/user.Lookup.
 	lookupUserFn func(username string) (userInfo, error)
 
+	// enumerateUsersFn returns all system users. If nil, defaults to
+	// enumerateSystemUsers.
+	enumerateUsersFn func() ([]enumeratedUser, error)
+
 	// nowFn returns the current time. If nil, defaults to time.Now.
 	nowFn func() time.Time
 
-	logger *slog.Logger
-	store  *anchor.TypedStore[Config]
+	deploymentID string
+	logger       *slog.Logger
+	store        *anchor.TypedStore[Config]
 }
 
 func (m *Module) Name() string { return "ssh_authorized_keys" }
 
 func (m *Module) Init(_ context.Context, ic anchor.InitContext) error {
+	m.deploymentID = ic.App.DeploymentID()
 	m.logger = ic.Logger
 	m.store = anchor.Register[Config](ic.App)
 
@@ -86,6 +92,13 @@ func (m *Module) lookupUser(username string) (userInfo, error) {
 	return userInfo{homeDir: u.HomeDir, uid: uint32(uid), gid: uint32(gid)}, nil
 }
 
+func (m *Module) enumerateUsers() ([]enumeratedUser, error) {
+	if m.enumerateUsersFn != nil {
+		return m.enumerateUsersFn()
+	}
+	return enumerateSystemUsers()
+}
+
 func (m *Module) now() time.Time {
 	if m.nowFn != nil {
 		return m.nowFn()
@@ -112,6 +125,7 @@ func (m *Module) watchLoop(ctx context.Context, store *anchor.TypedStore[Config]
 					m.logger.Info("updated authorized_keys", "username", username, "num_keys", len(cfg.Keys))
 				}
 			}
+			m.reconcile(state)
 		}
 	}
 }
@@ -144,7 +158,8 @@ func (m *Module) writeAuthorizedKeys(username string, keys []string) error {
 	}
 
 	path := filepath.Join(sshDir, "authorized_keys")
-	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Last updated: %s\n%s\n",
+	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: %s\n# Last updated: %s\n%s\n",
+		m.deploymentID,
 		m.now().UTC().Format(time.RFC3339),
 		strings.Join(keys, "\n"),
 	)
@@ -153,6 +168,90 @@ func (m *Module) writeAuthorizedKeys(username string, keys []string) error {
 		return fmt.Errorf("write authorized_keys for %q: %w", username, err)
 	}
 	return nil
+}
+
+// parseDeploymentID extracts the deployment ID from an authorized_keys file's
+// content. Returns "" if the file is not anchor-managed or has no deployment
+// header.
+func parseDeploymentID(content string) string {
+	for _, line := range strings.SplitN(content, "\n", 5) {
+		if id, ok := strings.CutPrefix(line, "# Deployment: "); ok {
+			return id
+		}
+		// Stop scanning after the header region.
+		if line != "" && !strings.HasPrefix(line, "#") {
+			break
+		}
+	}
+	return ""
+}
+
+// readDeploymentID reads an authorized_keys file and returns its deployment
+// ID. Returns "" for non-existent or non-anchor files.
+func readDeploymentID(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return parseDeploymentID(string(data)), nil
+}
+
+// revokeAuthorizedKeys writes a header-only authorized_keys file for the
+// given user, effectively revoking all SSH keys while leaving an audit trail.
+func (m *Module) revokeAuthorizedKeys(username, homeDir string) error {
+	path := filepath.Join(homeDir, ".ssh", "authorized_keys")
+	content := fmt.Sprintf("# Managed by anchor - do not edit manually\n# Deployment: %s\n# Last updated: %s\n# Keys revoked: user removed from configuration\n",
+		m.deploymentID,
+		m.now().UTC().Format(time.RFC3339),
+	)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("revoke authorized_keys for %q: %w", username, err)
+	}
+	return nil
+}
+
+// reconcile enumerates system users and revokes anchor-managed
+// authorized_keys files for users not present in the current state.
+func (m *Module) reconcile(state map[string]Config) {
+	users, err := m.enumerateUsers()
+	if err != nil {
+		m.logger.Error("failed to enumerate system users", "err", err)
+		return
+	}
+
+	for _, u := range users {
+		if _, ok := state[u.username]; ok {
+			continue
+		}
+
+		akPath := filepath.Join(u.homeDir, ".ssh", "authorized_keys")
+		depID, err := readDeploymentID(akPath)
+		if err != nil {
+			m.logger.Error("failed to read deployment id", "username", u.username, "err", err)
+			continue
+		}
+		if depID == "" {
+			// Not managed by anchor; leave it alone.
+			continue
+		}
+		if depID != m.deploymentID {
+			m.logger.Warn("authorized_keys managed by different deployment",
+				"username", u.username,
+				"file_deployment_id", depID,
+				"our_deployment_id", m.deploymentID,
+			)
+			continue
+		}
+
+		if err := m.revokeAuthorizedKeys(u.username, u.homeDir); err != nil {
+			m.logger.Error("failed to revoke authorized_keys", "username", u.username, "err", err)
+		} else {
+			m.logger.Info("revoked authorized_keys for removed user", "username", u.username)
+		}
+	}
 }
 
 // deduplicateAndSort removes duplicate keys and sorts the result for stable output.
