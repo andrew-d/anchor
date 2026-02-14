@@ -125,12 +125,19 @@ type snapshotCursor struct {
 	Pos  int64  `json:"pos"`
 }
 
-// Snapshot returns a snapshot of the FSM state.
+// Snapshot returns a snapshot of the FSM state. All three tables are read
+// inside a single transaction so the snapshot is self-consistent.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
+	tx, err := f.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	var data snapshotData
 
 	// KV entries.
-	kvRows, err := f.db.Query(`SELECT kind, key, value FROM fsm_kv`)
+	kvRows, err := tx.Query(`SELECT kind, key, value FROM fsm_kv`)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +156,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	}
 
 	// Events.
-	eventRows, err := f.db.Query(`SELECT raft_index, kind, change, key, value FROM fsm_events`)
+	eventRows, err := tx.Query(`SELECT raft_index, kind, change, key, value FROM fsm_events`)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +173,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	}
 
 	// Cursors.
-	cursorRows, err := f.db.Query(`SELECT name, pos FROM fsm_cursors`)
+	cursorRows, err := tx.Query(`SELECT name, pos FROM fsm_cursors`)
 	if err != nil {
 		return nil, err
 	}
