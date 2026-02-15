@@ -14,6 +14,18 @@ const (
 	Error
 )
 
+// String returns the severity as a lowercase string.
+func (s Severity) String() string {
+	switch s {
+	case Warning:
+		return "warning"
+	case Error:
+		return "error"
+	default:
+		return "unknown"
+	}
+}
+
 // Problem is an active error or warning condition reported by a module.
 type Problem struct {
 	Severity Severity

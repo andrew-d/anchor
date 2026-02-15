@@ -24,6 +24,10 @@ func (a *App) startHTTP() error {
 	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
 	mux.HandleFunc("POST /internal/join", a.handleJoin)
 
+	// Web UI.
+	mux.HandleFunc("GET /{$}", a.handleUI)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub()))))
+
 	a.httpServer = &http.Server{Handler: mux}
 
 	ln, err := net.Listen("tcp", a.config.HTTPAddr)

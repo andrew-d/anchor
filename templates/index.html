@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Anchor Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>Anchor Dashboard</h1>
+
+    <div class="card">
+        <h2>Cluster Status</h2>
+        <dl>
+            <dt>Node ID <span class="info" data-tip="Unique identifier for this node in the cluster">i</span></dt>
+            <dd>{{.NodeID}}</dd>
+            <dt>Raft State <span class="info" data-tip="Current consensus role: Leader, Follower, or Candidate">i</span></dt>
+            <dd>
+                {{if eq .RaftState "Leader"}}
+                    <span class="badge badge-green">Leader</span>
+                {{else if eq .RaftState "Follower"}}
+                    <span class="badge badge-gray">Follower</span>
+                {{else}}
+                    <span class="badge badge-yellow">{{.RaftState}}</span>
+                {{end}}
+            </dd>
+            <dt>Leader <span class="info" data-tip="The node currently coordinating writes for the cluster">i</span></dt>
+            <dd>{{if .LeaderID}}{{.LeaderID}} ({{.LeaderAddr}}){{else}}<span class="empty">unknown</span>{{end}}</dd>
+            <dt>Deployment ID <span class="info" data-tip="Persistent identifier generated on first startup of this node">i</span></dt>
+            <dd>{{.DeploymentID}}</dd>
+        </dl>
+        {{if .Nodes}}
+        <table>
+            <thead><tr><th>Node ID</th><th>Raft Address</th><th>Role</th></tr></thead>
+            <tbody>
+            {{range .Nodes}}
+            <tr>
+                <td>{{.ID}}</td>
+                <td>{{.Address}}</td>
+                <td>
+                    {{if .IsLeader}}<span class="badge badge-green">Leader</span>{{else}}<span class="badge badge-gray">Follower</span>{{end}}
+                    {{if .IsThis}}<span class="badge badge-blue">this node</span>{{end}}
+                </td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{end}}
+    </div>
+
+    <div class="card">
+        <h2>Modules</h2>
+        {{if .Modules}}
+        <table>
+            <thead><tr><th>Module</th><th>Status</th></tr></thead>
+            <tbody>
+            {{range .Modules}}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>
+                    {{if .HasProblems}}
+                        <span class="badge badge-red">{{.ProblemCount}} problem{{if gt .ProblemCount 1}}s{{end}}</span>
+                    {{else}}
+                        <span class="badge badge-green">OK</span>
+                    {{end}}
+                </td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <p class="empty">No modules registered.</p>
+        {{end}}
+    </div>
+
+    <div class="card">
+        <h2>Registered Kinds <span class="info" data-tip="Configuration types that modules have registered for type-safe storage">i</span></h2>
+        {{if .Kinds}}
+        <ul class="kinds-list">
+            {{range .Kinds}}<li>{{.}}</li>{{end}}
+        </ul>
+        {{else}}
+        <p class="empty">No kinds registered.</p>
+        {{end}}
+    </div>
+
+    <div class="card">
+        <h2>Problems</h2>
+        {{if .Problems}}
+        <table>
+            <thead><tr><th>Severity</th><th>Module</th><th>Key</th><th>Message</th><th>Since</th></tr></thead>
+            <tbody>
+            {{range .Problems}}
+            <tr>
+                <td>
+                    {{if eq .Severity "error"}}
+                        <span class="badge badge-red">error</span>
+                    {{else if eq .Severity "warning"}}
+                        <span class="badge badge-yellow">warning</span>
+                    {{else}}
+                        <span class="badge badge-gray">{{.Severity}}</span>
+                    {{end}}
+                </td>
+                <td>{{.Module}}</td>
+                <td>{{.Key}}</td>
+                <td>{{.Message}}</td>
+                <td>{{.Since}}</td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+        {{else}}
+        <p><span class="badge badge-green">No active problems</span></p>
+        {{end}}
+    </div>
+
+    <footer>Generated at {{.GeneratedAt}}</footer>
+</div>
+</body>
+</html>

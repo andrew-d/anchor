@@ -85,10 +85,10 @@ type App struct {
 // New creates a new App with the given configuration.
 func New(config Config) *App {
 	if config.ListenAddr == "" {
-		config.ListenAddr = ":12000"
+		config.ListenAddr = "127.0.0.1:12000"
 	}
 	if config.HTTPAddr == "" {
-		config.HTTPAddr = ":11000"
+		config.HTTPAddr = "127.0.0.1:11000"
 	}
 	logger := config.Logger
 	if logger == nil {

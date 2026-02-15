@@ -71,8 +71,8 @@ func (c *CLI) usage() {
 func (c *CLI) cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	dataDir := fs.String("data-dir", "", "Data directory (required)")
-	listen := fs.String("listen", ":12000", "Raft listen address")
-	httpAddr := fs.String("http", ":11000", "HTTP API address")
+	listen := fs.String("listen", "127.0.0.1:12000", "Raft listen address")
+	httpAddr := fs.String("http", "127.0.0.1:11000", "HTTP API address")
 	nodeID := fs.String("node-id", "", "Node ID (required)")
 	bootstrap := fs.Bool("bootstrap", false, "Bootstrap a new cluster")
 	join := fs.String("join", "", "HTTP address of existing node to join")
