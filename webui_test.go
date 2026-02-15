@@ -48,6 +48,37 @@ func TestWebUI_Dashboard(t *testing.T) {
 	}
 }
 
+func TestWebUI_Docs(t *testing.T) {
+	app := testApp(t)
+	addr := app.HTTPAddrForTest()
+
+	resp, err := http.Get(fmt.Sprintf("http://%s/docs", addr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("expected text/html content type, got %q", ct)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(body)
+
+	for _, ep := range apiEndpoints {
+		if !strings.Contains(html, ep.Pattern) {
+			t.Errorf("docs page missing endpoint pattern %q", ep.Pattern)
+		}
+	}
+}
+
 func TestWebUI_StaticCSS(t *testing.T) {
 	app := testApp(t)
 	addr := app.HTTPAddrForTest()

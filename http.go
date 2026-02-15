@@ -14,18 +14,21 @@ import (
 func (a *App) startHTTP() error {
 	mux := http.NewServeMux()
 
-	// CRUD for configuration kinds.
-	mux.HandleFunc("GET /api/v1/{kind}", a.handleList)
-	mux.HandleFunc("GET /api/v1/{kind}/{key}", a.handleGet)
-	mux.HandleFunc("PUT /api/v1/{kind}/{key}", a.handleSet)
-	mux.HandleFunc("DELETE /api/v1/{kind}/{key}", a.handleDelete)
+	// Public API routes driven by apiEndpoints (the single source of truth
+	// shared with the /docs page).
+	for _, ep := range apiEndpoints {
+		h := ep.Handler
+		mux.HandleFunc(ep.Method+" "+ep.Pattern, func(w http.ResponseWriter, r *http.Request) {
+			h(a, w, r)
+		})
+	}
 
-	// Cluster operations.
-	mux.HandleFunc("GET /api/v1/status", a.handleStatus)
+	// Internal routes (not in public docs).
 	mux.HandleFunc("POST /internal/join", a.handleJoin)
 
 	// Web UI.
 	mux.HandleFunc("GET /{$}", a.handleUI)
+	mux.HandleFunc("GET /docs", a.handleDocs)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub()))))
 
 	a.httpServer = &http.Server{Handler: mux}

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Anchor API Docs</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <header class="top-nav">
+        <h1>Anchor API Docs</h1>
+        <nav><a href="/">Dashboard</a></nav>
+    </header>
+
+    {{range .Sections}}
+    <div class="card">
+        <h2>{{.Name}}</h2>
+        {{range .Endpoints}}
+        <div class="endpoint">
+            <h3><span class="method method-{{.Method | lower}}">{{.Method}}</span> <code>{{.Pattern}}</code></h3>
+            <p>{{.Description}}</p>
+            <pre><code>{{.Example}}</code></pre>
+        </div>
+        {{end}}
+    </div>
+    {{end}}
+
+    <div class="card">
+        <h2>Common Patterns</h2>
+        <dl>
+            <dt>Leader redirection</dt>
+            <dd>Write operations (<code>PUT</code>, <code>DELETE</code>) on follower nodes return <code>307 Temporary Redirect</code> to the leader's HTTP address. Clients should follow the redirect or send writes directly to the leader.</dd>
+            <dt>Content type</dt>
+            <dd>All API responses use <code>application/json</code>. Request bodies for <code>PUT</code> and <code>POST</code> must also be JSON.</dd>
+            <dt>Error responses</dt>
+            <dd>Errors are returned as plain text with an appropriate HTTP status code (400, 404, 500, 503).</dd>
+        </dl>
+    </div>
+
+    <div class="card">
+        <h2>CLI</h2>
+        <p>The <code>anchor</code> CLI wraps the HTTP API.</p>
+        <table>
+            <thead><tr><th>Command</th><th>Description</th></tr></thead>
+            <tbody>
+                <tr><td><code>anchor get &lt;kind&gt; &lt;key&gt;</code></td><td>Fetch a single entry</td></tr>
+                <tr><td><code>anchor set &lt;kind&gt; &lt;key&gt; &lt;json&gt;</code></td><td>Create or update an entry</td></tr>
+                <tr><td><code>anchor delete &lt;kind&gt; &lt;key&gt;</code></td><td>Delete an entry</td></tr>
+                <tr><td><code>anchor list &lt;kind&gt;</code></td><td>List all entries of a kind</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>
