@@ -61,13 +61,19 @@ func countRecords(recs []logRecord, msg, key string) int {
 	return n
 }
 
-func TestWatchLoop(t *testing.T) {
+func newTestModule(t *testing.T) (*Module, *anchor.App, *recordHandler) {
+	t.Helper()
 	mod := &Module{applied: make(chan struct{})}
 	h := &recordHandler{}
-	anchortest.New(t, 1, func(int) []anchor.Module {
+	cluster := anchortest.New(t, 1, func(int) []anchor.Module {
 		return []anchor.Module{mod}
 	})
 	mod.logger = slog.New(h)
+	return mod, cluster.Nodes[0], h
+}
+
+func TestWatchLoop(t *testing.T) {
+	mod, _, h := newTestModule(t)
 	store := mod.store
 
 	// Drain the initial delivery (empty state on startup).
@@ -108,5 +114,43 @@ func TestWatchLoop(t *testing.T) {
 	<-mod.applied
 	if !hasRecord(h.snapshot(), "message removed", "greeting", "") {
 		t.Fatalf("expected 'message removed' log, got: %v", h.snapshot())
+	}
+}
+
+func TestWatchLoop_Problem(t *testing.T) {
+	mod, app, _ := newTestModule(t)
+	store := mod.store
+
+	// Drain the initial delivery.
+	<-mod.applied
+
+	// Setting a message with a problem reports a warning.
+	if err := store.Set("greeting", Config{Message: "hello", Problem: "something is wrong"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	<-mod.applied
+
+	problems := app.Problems()
+	if len(problems) != 1 {
+		t.Fatalf("expected 1 problem, got %d: %v", len(problems), problems)
+	}
+	if problems[0].Key != "greeting" {
+		t.Errorf("problem key = %q, want %q", problems[0].Key, "greeting")
+	}
+	if problems[0].Message != "something is wrong" {
+		t.Errorf("problem message = %q, want %q", problems[0].Message, "something is wrong")
+	}
+	if problems[0].Severity != anchor.Warning {
+		t.Errorf("problem severity = %v, want Warning", problems[0].Severity)
+	}
+
+	// Clearing the problem field removes the problem.
+	if err := store.Set("greeting", Config{Message: "hello"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	<-mod.applied
+
+	if problems := app.Problems(); len(problems) != 0 {
+		t.Fatalf("expected 0 problems after clearing, got %d: %v", len(problems), problems)
 	}
 }

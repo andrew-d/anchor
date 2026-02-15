@@ -6,8 +6,12 @@
 // arbitrary name:
 //
 //	{
-//	  "message": "Hello, world!"
+//	  "message": "Hello, world!",
+//	  "problem": "something is wrong"
 //	}
+//
+// If the optional "problem" field is set, it is reported as a warning via
+// the application's problem reporter, useful for demonstrating the dashboard.
 package example
 
 import (
@@ -20,6 +24,7 @@ import (
 // Config holds a single message entry.
 type Config struct {
 	Message string `json:"message"`
+	Problem string `json:"problem,omitempty"`
 }
 
 func (Config) Kind() string { return "example.Config" }
@@ -31,14 +36,16 @@ type Module struct {
 	// state delivery.
 	applied chan struct{}
 
-	logger *slog.Logger
-	store  *anchor.TypedStore[Config]
+	logger   *slog.Logger
+	problems *anchor.ProblemReporter
+	store    *anchor.TypedStore[Config]
 }
 
 func (m *Module) Name() string { return "example" }
 
 func (m *Module) Init(_ context.Context, ic anchor.InitContext) error {
 	m.logger = ic.Logger
+	m.problems = ic.Problems
 	m.store = anchor.Register[Config](ic.App)
 
 	ic.Go(func(ctx context.Context) {
@@ -64,14 +71,20 @@ func (m *Module) watchLoop(ctx context.Context) {
 				return
 			}
 
+			pass := m.problems.Begin()
 			for key, cfg := range state {
 				prev, existed := last[key]
 				if existed && prev == cfg.Message {
-					continue
+					// Message unchanged, but still report any problem.
+				} else {
+					m.logger.Info("message changed", "key", key, "message", cfg.Message)
+					last[key] = cfg.Message
 				}
-				m.logger.Info("message changed", "key", key, "message", cfg.Message)
-				last[key] = cfg.Message
+				if cfg.Problem != "" {
+					pass.Warn(key, cfg.Problem, "key", key)
+				}
 			}
+			pass.Commit()
 
 			// Log removals for keys that disappeared from state.
 			for key := range last {
