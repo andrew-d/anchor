@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -147,23 +148,25 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	dbPath := filepath.Join(a.config.DataDir, "anchor.db")
-	db, err := sql.Open("sqlite", dbPath)
+
+	// Set PRAGMAs via the DSN so they apply to every connection opened by
+	// the database/sql pool, not just the first one. Without this,
+	// connections created later would use the default busy_timeout of 0
+	// and fail immediately with SQLITE_BUSY under contention.
+	dsn := dbPath + "?" + url.Values{
+		"_pragma": []string{
+			"busy_timeout(10000)",
+			"auto_vacuum(INCREMENTAL)",
+			"journal_mode(WAL)",
+			"synchronous(FULL)",
+		},
+	}.Encode()
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
 	a.db = db
-
-	pragmas := []string{
-		"PRAGMA busy_timeout=10000;",
-		"PRAGMA auto_vacuum=INCREMENTAL;",
-		"PRAGMA journal_mode=WAL;",
-		"PRAGMA synchronous=FULL;",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			return fmt.Errorf("set pragma %q: %w", p, err)
-		}
-	}
 
 	// Read or generate deployment ID inside a transaction.
 	depID, err := readOrGenerateDeploymentID(db)

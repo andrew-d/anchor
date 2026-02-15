@@ -2,6 +2,8 @@ package anchor
 
 import (
 	"context"
+	"database/sql"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,6 +42,88 @@ func testApp(t *testing.T) *App {
 	}
 	t.Fatal("node did not become leader in time")
 	return nil
+}
+
+func TestStart_PragmasAppliedToAllConnections(t *testing.T) {
+	app := testApp(t)
+
+	// Force the pool to create several connections by holding them open
+	// simultaneously, then verify each one has the expected pragma values.
+	const numConns = 4
+	conns := make([]*sql.Conn, numConns)
+	for i := range conns {
+		c, err := app.db.Conn(t.Context())
+		if err != nil {
+			t.Fatalf("Conn[%d]: %v", i, err)
+		}
+		conns[i] = c
+	}
+	defer func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	}()
+
+	type pragmaCheck struct {
+		pragma string
+		want   string
+	}
+	checks := []pragmaCheck{
+		{"busy_timeout", "10000"},
+		{"journal_mode", "wal"},
+		{"synchronous", "2"},      // FULL = 2
+		{"auto_vacuum", "2"},      // INCREMENTAL = 2
+	}
+
+	for i, c := range conns {
+		for _, check := range checks {
+			var got string
+			err := c.QueryRowContext(t.Context(), "PRAGMA "+check.pragma).Scan(&got)
+			if err != nil {
+				t.Fatalf("conn[%d] PRAGMA %s: %v", i, check.pragma, err)
+			}
+			if got != check.want {
+				t.Errorf("conn[%d] PRAGMA %s = %q, want %q", i, check.pragma, got, check.want)
+			}
+		}
+	}
+}
+
+// TestStart_PragmasSetViaDSN verifies that the DSN approach works for a
+// fresh database without a running App, confirming the pragmas are
+// baked into the DSN rather than set after Open.
+func TestStart_PragmasSetViaDSN(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	// Open with the same DSN format used in App.Start.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Acquire two separate connections and verify both have the pragma.
+	for i := 0; i < 2; i++ {
+		c, err := db.Conn(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var timeout string
+		if err := c.QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&timeout); err != nil {
+			t.Fatal(err)
+		}
+		if timeout != "5000" {
+			t.Errorf("conn[%d] busy_timeout = %q, want %q", i, timeout, "5000")
+		}
+		var jm string
+		if err := c.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&jm); err != nil {
+			t.Fatal(err)
+		}
+		if jm != "wal" {
+			t.Errorf("conn[%d] journal_mode = %q, want %q", i, jm, "wal")
+		}
+		c.Close()
+	}
 }
 
 func TestShutdown_WaitsForModuleGoroutines(t *testing.T) {
