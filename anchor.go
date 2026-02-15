@@ -48,6 +48,11 @@ type Config struct {
 	// Mutually exclusive with Bootstrap.
 	JoinAddr string
 
+	// Nonvoter, when true, causes this node to join as a non-voting
+	// member. Nonvoters receive replicated data but do not participate
+	// in elections or commit quorum. Only meaningful when JoinAddr is set.
+	Nonvoter bool
+
 	// Logger is the structured logger for the App. If nil, [slog.Default] is
 	// used.
 	Logger *slog.Logger
@@ -314,9 +319,14 @@ func (a *App) storeNodeMeta(ctx context.Context) {
 }
 
 func (a *App) joinCluster() error {
-	body, err := json.Marshal(map[string]string{
-		"node_id":   a.config.NodeID,
-		"raft_addr": string(a.transport.LocalAddr()),
+	body, err := json.Marshal(struct {
+		NodeID   string `json:"node_id"`
+		RaftAddr string `json:"raft_addr"`
+		Voter    bool   `json:"voter"`
+	}{
+		NodeID:   a.config.NodeID,
+		RaftAddr: string(a.transport.LocalAddr()),
+		Voter:    !a.config.Nonvoter,
 	})
 	if err != nil {
 		return err

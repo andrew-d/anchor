@@ -42,7 +42,9 @@
                 <td>{{.ID}}</td>
                 <td>{{.Address}}</td>
                 <td>
-                    {{if .IsLeader}}<span class="badge badge-green">Leader</span>{{else}}<span class="badge badge-gray">Follower</span>{{end}}
+                    {{if .IsLeader}}<span class="badge badge-green">Leader</span>
+                    {{else if eq .Suffrage "Nonvoter"}}<span class="badge badge-yellow">Nonvoter</span>
+                    {{else}}<span class="badge badge-gray">Follower</span>{{end}}
                     {{if .IsThis}}<span class="badge badge-blue">this node</span>{{end}}
                 </td>
             </tr>

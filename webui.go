@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/raft"
 )
 
 //go:embed templates/*.html
@@ -49,6 +51,7 @@ type uiNode struct {
 	Address  string
 	IsThis   bool
 	IsLeader bool
+	Suffrage string // "Voter" or "Nonvoter"
 }
 
 type uiModule struct {
@@ -137,8 +140,8 @@ Content-Type: application/json
   "state": "Leader",
   "leader": {"id": "node-1", "address": "127.0.0.1:7000"},
   "nodes": [
-    {"id": "node-1", "address": "127.0.0.1:7000"},
-    {"id": "node-2", "address": "127.0.0.1:7001"}
+    {"id": "node-1", "address": "127.0.0.1:7000", "suffrage": "voter"},
+    {"id": "node-2", "address": "127.0.0.1:7001", "suffrage": "nonvoter"}
   ]
 }`,
 		Section: "Cluster API",
@@ -178,11 +181,16 @@ func (a *App) collectUIData() uiData {
 	configFuture := a.raft.GetConfiguration()
 	if configFuture.Error() == nil {
 		for _, s := range configFuture.Configuration().Servers {
+			suffrage := "Voter"
+			if s.Suffrage == raft.Nonvoter {
+				suffrage = "Nonvoter"
+			}
 			nodes = append(nodes, uiNode{
 				ID:       string(s.ID),
 				Address:  string(s.Address),
 				IsThis:   string(s.ID) == a.config.NodeID,
 				IsLeader: s.ID == leaderID,
+				Suffrage: suffrage,
 			})
 		}
 	}

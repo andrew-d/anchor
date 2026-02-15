@@ -76,6 +76,7 @@ func (c *CLI) cmdServe(args []string) int {
 	nodeID := fs.String("node-id", "", "Node ID (required)")
 	bootstrap := fs.Bool("bootstrap", false, "Bootstrap a new cluster")
 	join := fs.String("join", "", "HTTP address of existing node to join")
+	nonvoter := fs.Bool("nonvoter", false, "Join as a non-voting member (only relevant with --join)")
 	fs.Parse(args)
 
 	if *dataDir == "" || *nodeID == "" {
@@ -95,6 +96,7 @@ func (c *CLI) cmdServe(args []string) int {
 		NodeID:     *nodeID,
 		Bootstrap:  *bootstrap,
 		JoinAddr:   *join,
+		Nonvoter:   *nonvoter,
 	})
 	for _, m := range c.modules {
 		app.RegisterModule(m)

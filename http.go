@@ -171,16 +171,22 @@ func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type nodeInfo struct {
-		ID      string `json:"id"`
-		Address string `json:"address"`
+		ID       string `json:"id"`
+		Address  string `json:"address"`
+		Suffrage string `json:"suffrage"`
 	}
 
 	servers := configFuture.Configuration().Servers
 	nodes := make([]nodeInfo, 0, len(servers))
 	for _, s := range servers {
+		suffrage := "voter"
+		if s.Suffrage == raft.Nonvoter {
+			suffrage = "nonvoter"
+		}
 		nodes = append(nodes, nodeInfo{
-			ID:      string(s.ID),
-			Address: string(s.Address),
+			ID:       string(s.ID),
+			Address:  string(s.Address),
+			Suffrage: suffrage,
 		})
 	}
 
@@ -207,6 +213,7 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		NodeID   string `json:"node_id"`
 		RaftAddr string `json:"raft_addr"`
+		Voter    *bool  `json:"voter"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -215,6 +222,12 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 	if req.NodeID == "" || req.RaftAddr == "" {
 		http.Error(w, "node_id and raft_addr are required", http.StatusBadRequest)
 		return
+	}
+
+	voter := req.Voter == nil || *req.Voter
+	wantSuffrage := raft.Voter
+	if !voter {
+		wantSuffrage = raft.Nonvoter
 	}
 
 	// Deduplication: if a node with the same ID and address already exists, no-op.
@@ -226,13 +239,13 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 	for _, srv := range configFuture.Configuration().Servers {
 		if srv.ID == raft.ServerID(req.NodeID) || srv.Address == raft.ServerAddress(req.RaftAddr) {
-			if srv.ID == raft.ServerID(req.NodeID) && srv.Address == raft.ServerAddress(req.RaftAddr) {
-				// Already a member with matching ID and address.
+			if srv.ID == raft.ServerID(req.NodeID) && srv.Address == raft.ServerAddress(req.RaftAddr) && srv.Suffrage == wantSuffrage {
+				// Already a member with matching ID, address, and suffrage.
 				a.logger.Info("node already member, ignoring join", "node_id", req.NodeID, "raft_addr", req.RaftAddr)
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			// ID or address conflicts; remove the old entry.
+			// ID or address conflicts, or suffrage changed; remove the old entry.
 			future := a.raft.RemoveServer(srv.ID, 0, 0)
 			if err := future.Error(); err != nil {
 				http.Error(w, fmt.Sprintf("error removing existing node: %v", err), http.StatusInternalServerError)
@@ -241,12 +254,17 @@ func (a *App) handleJoin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	f := a.raft.AddVoter(raft.ServerID(req.NodeID), raft.ServerAddress(req.RaftAddr), 0, 0)
+	var f raft.IndexFuture
+	if voter {
+		f = a.raft.AddVoter(raft.ServerID(req.NodeID), raft.ServerAddress(req.RaftAddr), 0, 0)
+	} else {
+		f = a.raft.AddNonvoter(raft.ServerID(req.NodeID), raft.ServerAddress(req.RaftAddr), 0, 0)
+	}
 	if err := f.Error(); err != nil {
-		http.Error(w, fmt.Sprintf("error adding voter: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("error adding node: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	a.logger.Info("node joined successfully", "node_id", req.NodeID, "raft_addr", req.RaftAddr)
+	a.logger.Info("node joined successfully", "node_id", req.NodeID, "raft_addr", req.RaftAddr, "voter", voter)
 	w.WriteHeader(http.StatusOK)
 }

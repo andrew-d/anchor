@@ -2,6 +2,9 @@ package anchortest
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -105,5 +108,88 @@ func TestCluster_WaitForLeader(t *testing.T) {
 	}
 	if !cluster.Nodes[idx].IsLeaderForTest() {
 		t.Fatal("WaitForLeader returned a non-leader node")
+	}
+}
+
+func TestNonvoterJoin(t *testing.T) {
+	// 3-node cluster: node-0 bootstrap voter, node-1 voter, node-2 nonvoter.
+	mods := make([]*testModule, 3)
+	cluster := NewWithOptions(t, ClusterOptions{
+		NumNodes:    3,
+		NodeOptions: map[int]NodeOptions{2: {Nonvoter: true}},
+		ModsFn: func(i int) []anchor.Module {
+			mods[i] = &testModule{}
+			return []anchor.Module{mods[i]}
+		},
+	})
+
+	leaderIdx := cluster.WaitForLeader(t, 10*time.Second)
+	leader := cluster.Nodes[leaderIdx]
+
+	// Verify via the status API that node-2 has "nonvoter" suffrage.
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/status", leader.HTTPAddrForTest()))
+	if err != nil {
+		t.Fatalf("status request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var status struct {
+		Nodes []struct {
+			ID       string `json:"id"`
+			Suffrage string `json:"suffrage"`
+		} `json:"nodes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+
+	suffrageByID := make(map[string]string)
+	for _, n := range status.Nodes {
+		suffrageByID[n.ID] = n.Suffrage
+	}
+	if suffrageByID["node-0"] != "voter" {
+		t.Errorf("node-0 suffrage = %q, want %q", suffrageByID["node-0"], "voter")
+	}
+	if suffrageByID["node-1"] != "voter" {
+		t.Errorf("node-1 suffrage = %q, want %q", suffrageByID["node-1"], "voter")
+	}
+	if suffrageByID["node-2"] != "nonvoter" {
+		t.Errorf("node-2 suffrage = %q, want %q", suffrageByID["node-2"], "nonvoter")
+	}
+
+	// Write through leader, read from nonvoter to confirm replication.
+	if err := mods[leaderIdx].store.Set("alice", testValue{Name: "Alice"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	// Read from nonvoter (node-2) via HTTP to confirm replication.
+	nonvoterAddr := cluster.Nodes[2].HTTPAddrForTest()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := http.Get(fmt.Sprintf("http://%s/api/v1/anchortest.testValue/alice", nonvoterAddr))
+		if err == nil {
+			r.Body.Close()
+			if r.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	resp2, err := http.Get(fmt.Sprintf("http://%s/api/v1/anchortest.testValue/alice", nonvoterAddr))
+	if err != nil {
+		t.Fatalf("get from nonvoter: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("get from nonvoter returned %s", resp2.Status)
+	}
+	var got testValue
+	if err := json.NewDecoder(resp2.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Name != "Alice" {
+		t.Fatalf("expected Name=Alice from nonvoter, got %q", got.Name)
 	}
 }

@@ -20,6 +20,27 @@ type Cluster struct {
 	Nodes []*anchor.App
 }
 
+// NodeOptions holds per-node configuration overrides for a test cluster.
+type NodeOptions struct {
+	// Nonvoter, when true, causes this node to join as a non-voting
+	// member. Ignored for node 0 (the bootstrap node is always a voter).
+	Nonvoter bool
+}
+
+// ClusterOptions configures a test cluster created by NewWithOptions.
+type ClusterOptions struct {
+	// NumNodes is the number of nodes in the cluster (must be >= 1).
+	NumNodes int
+
+	// NodeOptions maps a node index to per-node overrides. Entries for
+	// indices outside [0, NumNodes) are ignored.
+	NodeOptions map[int]NodeOptions
+
+	// ModsFn, if non-nil, is called once per node with the node's index
+	// to create modules for that node.
+	ModsFn func(nodeIndex int) []anchor.Module
+}
+
 // New creates and starts a test cluster with numNodes nodes. Node 0 is
 // bootstrapped as the initial leader, and the remaining nodes join via
 // node 0's HTTP API. The cluster is shut down when t completes.
@@ -28,13 +49,22 @@ type Cluster struct {
 // create modules for that node.
 func New(t *testing.T, numNodes int, modsFn func(nodeIndex int) []anchor.Module) *Cluster {
 	t.Helper()
-	if numNodes < 1 {
-		t.Fatal("anchortest.New: numNodes must be >= 1")
+	return NewWithOptions(t, ClusterOptions{
+		NumNodes: numNodes,
+		ModsFn:   modsFn,
+	})
+}
+
+// NewWithOptions creates and starts a test cluster with the given options.
+func NewWithOptions(t *testing.T, opts ClusterOptions) *Cluster {
+	t.Helper()
+	if opts.NumNodes < 1 {
+		t.Fatal("anchortest.NewWithOptions: NumNodes must be >= 1")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	apps := make([]*anchor.App, numNodes)
+	apps := make([]*anchor.App, opts.NumNodes)
 
 	logger := slogt.New(t)
 
@@ -47,8 +77,8 @@ func New(t *testing.T, numNodes int, modsFn func(nodeIndex int) []anchor.Module)
 		Bootstrap:  true,
 		Logger:     logger,
 	})
-	if modsFn != nil {
-		for _, m := range modsFn(0) {
+	if opts.ModsFn != nil {
+		for _, m := range opts.ModsFn(0) {
 			apps[0].RegisterModule(m)
 		}
 	}
@@ -63,17 +93,21 @@ func New(t *testing.T, numNodes int, modsFn func(nodeIndex int) []anchor.Module)
 	joinAddr := apps[0].HTTPAddrForTest()
 
 	// Start and join remaining nodes.
-	for i := 1; i < numNodes; i++ {
-		apps[i] = anchor.New(anchor.Config{
+	for i := 1; i < opts.NumNodes; i++ {
+		cfg := anchor.Config{
 			DataDir:    t.TempDir(),
 			ListenAddr: "127.0.0.1:0",
 			HTTPAddr:   "127.0.0.1:0",
 			NodeID:     fmt.Sprintf("node-%d", i),
 			JoinAddr:   joinAddr,
 			Logger:     logger,
-		})
-		if modsFn != nil {
-			for _, m := range modsFn(i) {
+		}
+		if no, ok := opts.NodeOptions[i]; ok {
+			cfg.Nonvoter = no.Nonvoter
+		}
+		apps[i] = anchor.New(cfg)
+		if opts.ModsFn != nil {
+			for _, m := range opts.ModsFn(i) {
 				apps[i].RegisterModule(m)
 			}
 		}

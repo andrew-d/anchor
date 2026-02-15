@@ -283,3 +283,4 @@ func TestIntegration_TypedStore_WatchStore(t *testing.T) {
 		t.Fatal("timed out waiting for watch state")
 	}
 }
+
