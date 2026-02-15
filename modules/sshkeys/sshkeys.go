@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/andrew-d/anchor"
+	"github.com/andrew-d/anchor/internal/atomicfile"
 )
 
 // Config holds SSH key entries for a single user.
@@ -186,11 +187,13 @@ func (m *Module) writeAuthorizedKeys(username string, keys []string) error {
 		keyBlock,
 	)
 
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	uid, gid := int(info.uid), int(info.gid)
+	if err := atomicfile.WriteFile(path, []byte(content), atomicfile.Options{
+		Mode: 0o600,
+		UID:  &uid,
+		GID:  &gid,
+	}); err != nil {
 		return fmt.Errorf("write authorized_keys for %q: %w", username, err)
-	}
-	if err := os.Chown(path, int(info.uid), int(info.gid)); err != nil {
-		return fmt.Errorf("chown authorized_keys for %q: %w", username, err)
 	}
 	return nil
 }
@@ -251,11 +254,13 @@ func (m *Module) revokeAuthorizedKeys(username string) error {
 		m.deploymentID,
 		m.now().UTC().Format(time.RFC3339),
 	)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	uid, gid := int(info.uid), int(info.gid)
+	if err := atomicfile.WriteFile(path, []byte(content), atomicfile.Options{
+		Mode: 0o600,
+		UID:  &uid,
+		GID:  &gid,
+	}); err != nil {
 		return fmt.Errorf("revoke authorized_keys for %q: %w", username, err)
-	}
-	if err := os.Chown(path, int(info.uid), int(info.gid)); err != nil {
-		return fmt.Errorf("chown authorized_keys for %q: %w", username, err)
 	}
 	return nil
 }
