@@ -210,7 +210,9 @@ func (a *App) Start(ctx context.Context) error {
 	}
 
 	// Create the watch hub before modules init so watchers started during
-	// Init can subscribe immediately.
+	// Init can subscribe immediately. Watchers block until open is called
+	// after Raft finishes replaying log entries, preventing modules from
+	// seeing stale FSM state on startup.
 	a.watches = newWatchHub(a.ctx, a.logger)
 
 	// 3. Init modules (they register kinds via Register[T]).
@@ -246,6 +248,11 @@ func (a *App) Start(ctx context.Context) error {
 		return fmt.Errorf("create raft: %w", err)
 	}
 	a.raft = ra
+
+	// Raft has finished replaying log entries, so the FSM now reflects the
+	// latest committed state. Ungate watchers so modules see current data
+	// instead of stale snapshot state.
+	a.watches.open()
 
 	// 6. Bootstrap or join.
 	if a.config.Bootstrap {

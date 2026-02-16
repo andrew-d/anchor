@@ -1,11 +1,11 @@
 package anchor
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/neilotoole/slogt"
@@ -101,7 +101,8 @@ func testKeyWatcher(hub *watchHub, db *sql.DB, kind, key string) *Watcher[json.R
 
 func TestWatcher_InitialDelivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	insertKV(t, db, "users", "alice", `{"role":"admin"}`)
 
@@ -123,7 +124,8 @@ func TestWatcher_InitialDelivery(t *testing.T) {
 
 func TestWatcher_DeliveryAfterSignal(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
@@ -157,7 +159,8 @@ func TestWatcher_DeliveryAfterSignal(t *testing.T) {
 
 func TestWatcher_KindFiltering(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
@@ -184,7 +187,8 @@ func TestWatcher_KindFiltering(t *testing.T) {
 
 func TestWatcher_Stop(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	w := testStoreWatcher(hub, db, "users")
 	w.Stop()
@@ -210,7 +214,8 @@ func TestWatcher_Stop(t *testing.T) {
 
 func TestWatcher_StopDuringBlockedDelivery(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	insertKV(t, db, "users", "alice", `"v1"`)
 	w := testStoreWatcher(hub, db, "users")
@@ -231,7 +236,8 @@ func TestWatcher_StopDuringBlockedDelivery(t *testing.T) {
 
 func TestWatcher_MultipleConcurrent(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	insertKV(t, db, "users", "alice", `"v1"`)
 
@@ -255,7 +261,8 @@ func TestWatcher_MultipleConcurrent(t *testing.T) {
 
 func TestWatcher_EmptyState(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	w := testStoreWatcher(hub, db, "users")
 	defer w.Stop()
@@ -272,7 +279,8 @@ func TestWatcher_EmptyState(t *testing.T) {
 
 func TestWatcher_WatchKey(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	insertKV(t, db, "motd", "default", `"Hello, world!"`)
 
@@ -291,7 +299,8 @@ func TestWatcher_WatchKey(t *testing.T) {
 
 func TestWatcher_WatchKeyMissing(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	w := testKeyWatcher(hub, db, "motd", "default")
 	defer w.Stop()
@@ -306,9 +315,81 @@ func TestWatcher_WatchKeyMissing(t *testing.T) {
 	}
 }
 
+func TestWatcher_GatedBlocksUntilOpen(t *testing.T) {
+	db := testWatchDB(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		hub := newWatchHub(t.Context(), slogt.New(t))
+
+		insertKV(t, db, "users", "alice", `{"role":"admin"}`)
+
+		w := testStoreWatcher(hub, db, "users")
+		defer w.Stop()
+
+		// Wait for the watcher goroutine to block on the gate.
+		synctest.Wait()
+
+		// Non-blocking: nothing should be available.
+		select {
+		case <-w.State():
+			t.Fatal("watcher delivered state before hub was opened")
+		default:
+		}
+
+		hub.open()
+		synctest.Wait()
+
+		select {
+		case state := <-w.State():
+			if string(state["alice"]) != `{"role":"admin"}` {
+				t.Fatalf("unexpected value: %s", state["alice"])
+			}
+		default:
+			t.Fatal("no state delivered after open")
+		}
+	})
+}
+
+func TestWatcher_GatedSeesPostReplayState(t *testing.T) {
+	db := testWatchDB(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		hub := newWatchHub(t.Context(), slogt.New(t))
+
+		// Insert "stale" data (simulates state from a previous snapshot).
+		insertKV(t, db, "users", "alice", `{"role":"viewer"}`)
+
+		w := testStoreWatcher(hub, db, "users")
+		defer w.Stop()
+
+		// Wait for the watcher goroutine to block on the gate.
+		synctest.Wait()
+
+		// Simulate Raft log replay: update the data while the hub is gated.
+		insertKV(t, db, "users", "alice", `{"role":"admin"}`)
+		hub.signal("users")
+
+		// Open the gate after "replay" is done.
+		hub.open()
+		synctest.Wait()
+
+		// The first delivery must reflect the post-replay state, not the stale
+		// snapshot state.
+		select {
+		case state := <-w.State():
+			if string(state["alice"]) != `{"role":"admin"}` {
+				t.Fatalf("got stale state %s, want post-replay state", state["alice"])
+			}
+		default:
+			t.Fatal("no state delivered after open")
+		}
+	})
+}
+
 func TestWatcher_SignalAll(t *testing.T) {
 	db := testWatchDB(t)
-	hub := newWatchHub(context.Background(), slogt.New(t))
+	hub := newWatchHub(t.Context(), slogt.New(t))
+	hub.open()
 
 	w1 := testStoreWatcher(hub, db, "users")
 	defer w1.Stop()

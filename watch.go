@@ -65,6 +65,14 @@ func (w *Watcher[T]) loop() {
 	defer close(w.stopped)
 	defer close(w.out)
 
+	// Wait until the hub is opened before reading. This prevents watchers
+	// from seeing stale FSM state during Raft log replay on startup.
+	select {
+	case <-w.hub.ready:
+	case <-w.ctx.Done():
+		return
+	}
+
 	for {
 		state, err := retry.Do(w.ctx, func() (T, error) {
 			val, err := w.readFn()
@@ -97,6 +105,11 @@ type watchHub struct {
 	mu      sync.Mutex
 	entries map[string][]*watchEntry
 
+	// ready is closed by open to unblock watchers. Until open is called,
+	// watchers block before their first read. This prevents watchers from
+	// seeing stale FSM state during Raft log replay on startup.
+	ready chan struct{}
+
 	logger *slog.Logger
 }
 
@@ -104,8 +117,14 @@ func newWatchHub(ctx context.Context, logger *slog.Logger) *watchHub {
 	return &watchHub{
 		ctx:     ctx,
 		entries: make(map[string][]*watchEntry),
+		ready:   make(chan struct{}),
 		logger:  logger,
 	}
+}
+
+// open unblocks all watchers that are waiting on the hub's ready gate.
+func (h *watchHub) open() {
+	close(h.ready)
 }
 
 // subscribe registers a new subscription for the given kind.
