@@ -4,6 +4,12 @@ We are still developing this application. There is no need to migrate data or wo
 
 After making changes, verify with `go build ./...`, `go vet ./...`, and `go test ./... -count=1`.
 
+Run the project's custom vet tool to get the standard `go vet` checks plus project-specific analyzers:
+
+```
+go vet -vettool=$(go build -print ./cmd/vet) ./...
+```
+
 ## Architecture
 
 ### Modules
