@@ -12,15 +12,19 @@ import (
 // testApp creates a bootstrapped single-node App for testing.
 func testApp(t *testing.T) *App {
 	t.Helper()
-	dataDir := t.TempDir()
-
-	app := New(Config{
-		DataDir:    dataDir,
+	return testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
 		ListenAddr: "127.0.0.1:0",
 		HTTPAddr:   "127.0.0.1:0",
 		NodeID:     "test-node",
 		Bootstrap:  true,
 	})
+}
+
+func testAppWithConfig(t *testing.T, cfg Config) *App {
+	t.Helper()
+
+	app := New(cfg)
 
 	ctx := t.Context()
 	if err := app.Start(ctx); err != nil {
@@ -281,6 +285,208 @@ func TestIntegration_TypedStore_WatchStore(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for watch state")
+	}
+}
+
+func TestIntegration_TypedStore_ScopedResolution(t *testing.T) {
+	app := testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "host1",
+		OS:         "linux",
+		Bootstrap:  true,
+	})
+	store := Register[testUser](app)
+
+	// Set global, OS, and node-scoped values for "alice".
+	if err := store.Set("alice", testUser{Name: "Global Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("os:linux", "alice", testUser{Name: "Linux Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("node:host1", "alice", testUser{Name: "Host1 Alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Node scope should win (highest priority).
+	got, err := store.Get("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Host1 Alice" {
+		t.Fatalf("expected Host1 Alice, got %q", got.Name)
+	}
+}
+
+func TestIntegration_TypedStore_ScopedFallbackToOS(t *testing.T) {
+	app := testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "host2",
+		OS:         "linux",
+		Bootstrap:  true,
+	})
+	store := Register[testUser](app)
+
+	// Set global and OS-scoped values (no node scope for host2).
+	if err := store.Set("alice", testUser{Name: "Global Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("os:linux", "alice", testUser{Name: "Linux Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("node:host1", "alice", testUser{Name: "Host1 Alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// OS scope should win (node:host1 doesn't match host2).
+	got, err := store.Get("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Linux Alice" {
+		t.Fatalf("expected Linux Alice, got %q", got.Name)
+	}
+}
+
+func TestIntegration_TypedStore_ScopedFallbackToGlobal(t *testing.T) {
+	app := testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "host3",
+		OS:         "darwin",
+		Bootstrap:  true,
+	})
+	store := Register[testUser](app)
+
+	// Set global and scoped values that don't match this node.
+	if err := store.Set("alice", testUser{Name: "Global Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("os:linux", "alice", testUser{Name: "Linux Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("node:host1", "alice", testUser{Name: "Host1 Alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Global should win (neither os:linux nor node:host1 match).
+	got, err := store.Get("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Global Alice" {
+		t.Fatalf("expected Global Alice, got %q", got.Name)
+	}
+}
+
+func TestIntegration_TypedStore_ScopedList(t *testing.T) {
+	app := testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "host1",
+		OS:         "linux",
+		Bootstrap:  true,
+	})
+	store := Register[testUser](app)
+
+	// alice: global + node override
+	if err := store.Set("alice", testUser{Name: "Global Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("node:host1", "alice", testUser{Name: "Host1 Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	// bob: global only
+	if err := store.Set("bob", testUser{Name: "Bob"}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items["alice"].Name != "Host1 Alice" {
+		t.Fatalf("expected Host1 Alice from List, got %q", items["alice"].Name)
+	}
+	if items["bob"].Name != "Bob" {
+		t.Fatalf("expected Bob, got %q", items["bob"].Name)
+	}
+}
+
+func TestIntegration_TypedStore_DeleteScoped(t *testing.T) {
+	app := testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "host1",
+		OS:         "linux",
+		Bootstrap:  true,
+	})
+	store := Register[testUser](app)
+
+	if err := store.Set("alice", testUser{Name: "Global Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScoped("node:host1", "alice", testUser{Name: "Host1 Alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete only the node scope.
+	if err := store.DeleteScoped("node:host1", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should fall back to global.
+	got, err := store.Get("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Global Alice" {
+		t.Fatalf("expected Global Alice after scoped delete, got %q", got.Name)
+	}
+}
+
+func TestIntegration_TypedStore_NoMatchingScope(t *testing.T) {
+	app := testAppWithConfig(t, Config{
+		DataDir:    t.TempDir(),
+		ListenAddr: "127.0.0.1:0",
+		HTTPAddr:   "127.0.0.1:0",
+		NodeID:     "host1",
+		OS:         "linux",
+		Bootstrap:  true,
+	})
+	store := Register[testUser](app)
+
+	// Only set a scope that doesn't match this node.
+	if err := store.SetScoped("node:other", "alice", testUser{Name: "Other Alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should return zero value (no match).
+	got, err := store.Get("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "" {
+		t.Fatalf("expected zero value, got %q", got.Name)
+	}
+
+	// List should also not include it.
+	items, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items, got %d", len(items))
 	}
 }
 

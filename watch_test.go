@@ -36,12 +36,12 @@ func testWatchDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// insertKV inserts a row into fsm_kv.
+// insertKV inserts a row into fsm_kv at global scope.
 func insertKV(t *testing.T, db *sql.DB, kind, key, value string) {
 	t.Helper()
 	_, err := db.Exec(
-		`INSERT INTO fsm_kv(kind, key, value) VALUES(?, ?, ?)
-		 ON CONFLICT(kind, key) DO UPDATE SET value = excluded.value`,
+		`INSERT INTO fsm_kv(kind, scope, key, value) VALUES(?, '', ?, ?)
+		 ON CONFLICT(kind, scope, key) DO UPDATE SET value = excluded.value`,
 		kind, key, value,
 	)
 	if err != nil {
@@ -49,10 +49,10 @@ func insertKV(t *testing.T, db *sql.DB, kind, key, value string) {
 	}
 }
 
-// deleteKV deletes a row from fsm_kv.
+// deleteKV deletes a row from fsm_kv at global scope.
 func deleteKV(t *testing.T, db *sql.DB, kind, key string) {
 	t.Helper()
-	_, err := db.Exec(`DELETE FROM fsm_kv WHERE kind = ? AND key = ?`, kind, key)
+	_, err := db.Exec(`DELETE FROM fsm_kv WHERE kind = ? AND scope = '' AND key = ?`, kind, key)
 	if err != nil {
 		t.Fatal(err)
 	}

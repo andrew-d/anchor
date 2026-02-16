@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS fsm_kv (
 	kind  TEXT NOT NULL,
+	scope TEXT NOT NULL DEFAULT '',
 	key   TEXT NOT NULL,
 	value TEXT NOT NULL,
-	PRIMARY KEY (kind, key)
+	PRIMARY KEY (kind, scope, key)
 ) STRICT;

@@ -72,9 +72,10 @@ func (a *App) redirectToLeader(w http.ResponseWriter, r *http.Request) bool {
 func (a *App) handleGet(w http.ResponseWriter, r *http.Request) {
 	kind := r.PathValue("kind")
 	key := r.PathValue("key")
+	scope := r.URL.Query().Get("scope")
 
 	f := (*fsm)(a)
-	raw, err := f.fsmGet(kind, key)
+	raw, err := f.fsmGetExact(kind, scope, key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -92,7 +93,7 @@ func (a *App) handleList(w http.ResponseWriter, r *http.Request) {
 	kind := r.PathValue("kind")
 
 	f := (*fsm)(a)
-	items, err := f.fsmList(kind)
+	items, err := f.fsmListAll(kind)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -109,6 +110,14 @@ func (a *App) handleSet(w http.ResponseWriter, r *http.Request) {
 
 	kind := r.PathValue("kind")
 	key := r.PathValue("key")
+	scope := r.URL.Query().Get("scope")
+
+	if scope != "" {
+		if _, err := ParseScope(scope); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -131,6 +140,7 @@ func (a *App) handleSet(w http.ResponseWriter, r *http.Request) {
 	cmd := Command{
 		Type:  CmdSet,
 		Kind:  kind,
+		Scope: scope,
 		Key:   key,
 		Value: body,
 	}
@@ -148,11 +158,20 @@ func (a *App) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	kind := r.PathValue("kind")
 	key := r.PathValue("key")
+	scope := r.URL.Query().Get("scope")
+
+	if scope != "" {
+		if _, err := ParseScope(scope); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 
 	cmd := Command{
-		Type: CmdDelete,
-		Kind: kind,
-		Key:  key,
+		Type:  CmdDelete,
+		Kind:  kind,
+		Scope: scope,
+		Key:   key,
 	}
 	if err := a.applyCommand(cmd); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

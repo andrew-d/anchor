@@ -34,14 +34,14 @@ func (f *fsm) Apply(l *raft.Log) any {
 	switch cmd.Type {
 	case CmdSet:
 		_, err = f.db.Exec(
-			`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)
-			 ON CONFLICT (kind, key) DO UPDATE SET value = excluded.value`,
-			cmd.Kind, cmd.Key, string(cmd.Value),
+			`INSERT INTO fsm_kv (kind, scope, key, value) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (kind, scope, key) DO UPDATE SET value = excluded.value`,
+			cmd.Kind, cmd.Scope, cmd.Key, string(cmd.Value),
 		)
 	case CmdDelete:
 		_, err = f.db.Exec(
-			`DELETE FROM fsm_kv WHERE kind = ? AND key = ?`,
-			cmd.Kind, cmd.Key,
+			`DELETE FROM fsm_kv WHERE kind = ? AND scope = ? AND key = ?`,
+			cmd.Kind, cmd.Scope, cmd.Key,
 		)
 	default:
 		panic(fmt.Sprintf("unrecognized command type: %s", cmd.Type))
@@ -62,6 +62,7 @@ type snapshotData struct {
 
 type snapshotKV struct {
 	Kind  string          `json:"kind"`
+	Scope string          `json:"scope,omitempty"`
 	Key   string          `json:"key"`
 	Value json.RawMessage `json:"value"`
 }
@@ -76,7 +77,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 
 	var data snapshotData
 
-	rows, err := tx.Query(`SELECT kind, key, value FROM fsm_kv`)
+	rows, err := tx.Query(`SELECT kind, scope, key, value FROM fsm_kv`)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +85,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	for rows.Next() {
 		var e snapshotKV
 		var val string
-		if err := rows.Scan(&e.Kind, &e.Key, &val); err != nil {
+		if err := rows.Scan(&e.Kind, &e.Scope, &e.Key, &val); err != nil {
 			return nil, err
 		}
 		e.Value = json.RawMessage(val)
@@ -94,7 +95,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 		return nil, err
 	}
 
-	data.Version = 1
+	data.Version = 2
 	return &fsmSnapshot{data: data}, nil
 }
 
@@ -107,7 +108,12 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	if err := json.NewDecoder(rc).Decode(&data); err != nil {
 		return err
 	}
-	if data.Version != 1 {
+
+	switch data.Version {
+	case 1, 2:
+		// Version 1 snapshots lack the scope field; snapshotKV.Scope
+		// defaults to "" (global), which is correct.
+	default:
 		return fmt.Errorf("unsupported snapshot version: %d", data.Version)
 	}
 
@@ -122,8 +128,8 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	}
 
 	for _, e := range data.KV {
-		if _, err := tx.Exec(`INSERT INTO fsm_kv (kind, key, value) VALUES (?, ?, ?)`,
-			e.Kind, e.Key, string(e.Value)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO fsm_kv (kind, scope, key, value) VALUES (?, ?, ?, ?)`,
+			e.Kind, e.Scope, e.Key, string(e.Value)); err != nil {
 			return err
 		}
 	}
@@ -136,12 +142,14 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	return nil
 }
 
-// fsmGet reads a single value from the local FSM state.
-func (f *fsm) fsmGet(kind, key string) (json.RawMessage, error) {
+// fsmGetExact reads a single value from the local FSM state at a specific scope.
+// It does NOT perform scope resolution — use fsmGetAllScopes + resolveEntries
+// for that. This is for internal/admin reads where you know the exact scope.
+func (f *fsm) fsmGetExact(kind, scope, key string) (json.RawMessage, error) {
 	var val string
 	err := f.db.QueryRow(
-		`SELECT value FROM fsm_kv WHERE kind = ? AND key = ?`,
-		kind, key,
+		`SELECT value FROM fsm_kv WHERE kind = ? AND scope = ? AND key = ?`,
+		kind, scope, key,
 	).Scan(&val)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -152,10 +160,18 @@ func (f *fsm) fsmGet(kind, key string) (json.RawMessage, error) {
 	return json.RawMessage(val), nil
 }
 
-// fsmList reads all entries for a given kind from the local FSM state.
-func (f *fsm) fsmList(kind string) (map[string]json.RawMessage, error) {
+// fsmEntry is a single scoped key-value entry.
+type fsmEntry struct {
+	Scope string          `json:"scope"`
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
+// fsmListAll reads all entries for a given kind from the local FSM state,
+// including their scope. Used by TypedStore for scope resolution.
+func (f *fsm) fsmListAll(kind string) ([]fsmEntry, error) {
 	rows, err := f.db.Query(
-		`SELECT key, value FROM fsm_kv WHERE kind = ?`,
+		`SELECT scope, key, value FROM fsm_kv WHERE kind = ?`,
 		kind,
 	)
 	if err != nil {
@@ -163,13 +179,39 @@ func (f *fsm) fsmList(kind string) (map[string]json.RawMessage, error) {
 	}
 	defer rows.Close()
 
-	result := make(map[string]json.RawMessage)
+	var result []fsmEntry
 	for rows.Next() {
-		var key, val string
-		if err := rows.Scan(&key, &val); err != nil {
+		var e fsmEntry
+		var val string
+		if err := rows.Scan(&e.Scope, &e.Key, &val); err != nil {
 			return nil, err
 		}
-		result[key] = json.RawMessage(val)
+		e.Value = json.RawMessage(val)
+		result = append(result, e)
+	}
+	return result, rows.Err()
+}
+
+// fsmGetAllScopes reads all scoped entries for a given kind and key.
+func (f *fsm) fsmGetAllScopes(kind, key string) ([]fsmEntry, error) {
+	rows, err := f.db.Query(
+		`SELECT scope, key, value FROM fsm_kv WHERE kind = ? AND key = ?`,
+		kind, key,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []fsmEntry
+	for rows.Next() {
+		var e fsmEntry
+		var val string
+		if err := rows.Scan(&e.Scope, &e.Key, &val); err != nil {
+			return nil, err
+		}
+		e.Value = json.RawMessage(val)
+		result = append(result, e)
 	}
 	return result, rows.Err()
 }
