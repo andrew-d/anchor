@@ -142,8 +142,10 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	return nil
 }
 
-// fsmGet reads a single value from the local FSM state at a specific scope.
-func (f *fsm) fsmGet(kind, scope, key string) (json.RawMessage, error) {
+// fsmGetExact reads a single value from the local FSM state at a specific scope.
+// It does NOT perform scope resolution — use fsmGetAllScopes + resolveEntries
+// for that. This is for internal/admin reads where you know the exact scope.
+func (f *fsm) fsmGetExact(kind, scope, key string) (json.RawMessage, error) {
 	var val string
 	err := f.db.QueryRow(
 		`SELECT value FROM fsm_kv WHERE kind = ? AND scope = ? AND key = ?`,

@@ -81,7 +81,7 @@ func TestFSM_ApplySet(t *testing.T) {
 
 	f.applySet(t, "users", "", "alice", map[string]string{"role": "admin"})
 
-	raw, err := f.fsmGet("users", "", "alice")
+	raw, err := f.fsmGetExact("users", "", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestFSM_ApplyOverwrite(t *testing.T) {
 	f.applySet(t, "users", "", "alice", map[string]string{"role": "viewer"})
 	f.applySet(t, "users", "", "alice", map[string]string{"role": "admin"})
 
-	raw, err := f.fsmGet("users", "", "alice")
+	raw, err := f.fsmGetExact("users", "", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestFSM_ApplyDelete(t *testing.T) {
 	f.applySet(t, "users", "", "alice", "hello")
 	f.applyDelete(t, "users", "", "alice")
 
-	raw, err := f.fsmGet("users", "", "alice")
+	raw, err := f.fsmGetExact("users", "", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestFSM_ScopedSetGet(t *testing.T) {
 	f.applySet(t, "config", "node:host1", "key1", "host1")
 
 	// Each scope is independent.
-	raw, err := f.fsmGet("config", "", "key1")
+	raw, err := f.fsmGetExact("config", "", "key1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestFSM_ScopedSetGet(t *testing.T) {
 		t.Fatalf("global: got %s", raw)
 	}
 
-	raw, err = f.fsmGet("config", "os:linux", "key1")
+	raw, err = f.fsmGetExact("config", "os:linux", "key1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestFSM_ScopedSetGet(t *testing.T) {
 		t.Fatalf("os:linux: got %s", raw)
 	}
 
-	raw, err = f.fsmGet("config", "node:host1", "key1")
+	raw, err = f.fsmGetExact("config", "node:host1", "key1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestFSM_ScopedDelete(t *testing.T) {
 	// Delete only the os scope.
 	f.applyDelete(t, "config", "os:linux", "key1")
 
-	raw, err := f.fsmGet("config", "os:linux", "key1")
+	raw, err := f.fsmGetExact("config", "os:linux", "key1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestFSM_ScopedDelete(t *testing.T) {
 	}
 
 	// Global should still exist.
-	raw, err = f.fsmGet("config", "", "key1")
+	raw, err = f.fsmGetExact("config", "", "key1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 		t.Fatalf("expected 2 users after restore, got %d", len(items))
 	}
 
-	raw, err := f2.fsmGet("servers", "", "web1")
+	raw, err := f2.fsmGetExact("servers", "", "web1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 	}
 
 	// Verify scoped entry was restored.
-	raw, err = f2.fsmGet("servers", "os:linux", "web1")
+	raw, err = f2.fsmGetExact("servers", "os:linux", "web1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestFSM_RestoreV1Snapshot(t *testing.T) {
 	}
 
 	// v1 entries should be restored at global scope.
-	raw, err := f.fsmGet("users", "", "alice")
+	raw, err := f.fsmGetExact("users", "", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}

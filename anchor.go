@@ -106,8 +106,16 @@ func New(config Config) *App {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	osName := config.OS
+	if osName == "" {
+		osName = runtime.GOOS
+	}
 	return &App{
-		config:   config,
+		config: config,
+		nodeInfo: NodeInfo{
+			ID: config.NodeID,
+			OS: osName,
+		},
 		kinds:    make(map[string]kindInfo),
 		problems: newProblemStore(),
 		logger:   logger,
@@ -152,16 +160,6 @@ func (a *App) Problems() []Problem {
 // canceled or an error occurs during startup.
 func (a *App) Start(ctx context.Context) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
-
-	// Populate node info for scope resolution.
-	osName := a.config.OS
-	if osName == "" {
-		osName = runtime.GOOS
-	}
-	a.nodeInfo = NodeInfo{
-		ID: a.config.NodeID,
-		OS: osName,
-	}
 
 	// 1. Open single SQLite database and set PRAGMAs.
 	if err := os.MkdirAll(a.config.DataDir, 0o700); err != nil {
@@ -449,7 +447,7 @@ func (a *App) leaderHTTPAddr() (string, error) {
 	}
 
 	f := (*fsm)(a)
-	raw, err := f.fsmGet(nodeMetaKind, "", string(leaderID))
+	raw, err := f.fsmGetExact(nodeMetaKind, "", string(leaderID))
 	if err != nil {
 		return "", err
 	}

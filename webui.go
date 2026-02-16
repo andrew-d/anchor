@@ -99,7 +99,7 @@ var apiEndpoints = []apiEndpoint{
 		Method:      "GET",
 		Pattern:     "/api/v1/{kind}/{key}",
 		Handler:     (*App).handleGet,
-		Description: "Get a single entry. Use ?scope= to read a specific scope (default: global). Returns 404 if the key does not exist.",
+		Description: "Get a single entry at an exact scope. Use ?scope= to read a specific scope (default: global). This returns the raw entry, not the resolved value — it does not perform scope fallback. Returns 404 if the key does not exist at the given scope.",
 		Example: `GET /api/v1/sshkeys/alice?scope=node:host1
 
 200 OK

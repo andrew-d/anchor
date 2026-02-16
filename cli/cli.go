@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 
@@ -136,7 +137,7 @@ func cmdGet(args []string) int {
 
 	u := fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key)
 	if *scope != "" {
-		u += "?scope=" + *scope
+		u += "?" + url.Values{"scope": {*scope}}.Encode()
 	}
 
 	resp, err := http.Get(u)
@@ -183,7 +184,7 @@ func cmdSet(args []string) int {
 
 	u := fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key)
 	if *scope != "" {
-		u += "?scope=" + *scope
+		u += "?" + url.Values{"scope": {*scope}}.Encode()
 	}
 
 	req, err := http.NewRequest(http.MethodPut, u, bytes.NewReader(body))
@@ -224,7 +225,7 @@ func cmdDelete(args []string) int {
 
 	u := fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key)
 	if *scope != "" {
-		u += "?scope=" + *scope
+		u += "?" + url.Values{"scope": {*scope}}.Encode()
 	}
 
 	req, err := http.NewRequest(http.MethodDelete, u, nil)

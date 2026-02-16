@@ -75,7 +75,7 @@ func (a *App) handleGet(w http.ResponseWriter, r *http.Request) {
 	scope := r.URL.Query().Get("scope")
 
 	f := (*fsm)(a)
-	raw, err := f.fsmGet(kind, scope, key)
+	raw, err := f.fsmGetExact(kind, scope, key)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
