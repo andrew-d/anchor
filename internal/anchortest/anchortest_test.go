@@ -193,3 +193,68 @@ func TestNonvoterJoin(t *testing.T) {
 		t.Fatalf("expected Name=Alice from nonvoter, got %q", got.Name)
 	}
 }
+
+func TestCluster_ScopedResolution(t *testing.T) {
+	// 2-node cluster: node-0 is "linux", node-1 is "darwin".
+	mods := make([]*testModule, 2)
+	cluster := NewWithOptions(t, ClusterOptions{
+		NumNodes: 2,
+		NodeOptions: map[int]NodeOptions{
+			0: {OS: "linux"},
+			1: {OS: "darwin"},
+		},
+		ModsFn: func(i int) []anchor.Module {
+			mods[i] = &testModule{}
+			return []anchor.Module{mods[i]}
+		},
+	})
+
+	leaderIdx := cluster.WaitForLeader(t, 10*time.Second)
+
+	// Write global + OS-scoped values through the leader.
+	if err := mods[leaderIdx].store.Set("config", testValue{Name: "Global"}); err != nil {
+		t.Fatalf("set global: %v", err)
+	}
+	if err := mods[leaderIdx].store.SetScoped("os:linux", "config", testValue{Name: "Linux"}); err != nil {
+		t.Fatalf("set os:linux: %v", err)
+	}
+	if err := mods[leaderIdx].store.SetScoped("os:darwin", "config", testValue{Name: "Darwin"}); err != nil {
+		t.Fatalf("set os:darwin: %v", err)
+	}
+
+	// Wait for replication and verify resolved values.
+	wantByNode := map[int]string{
+		0: "Linux",
+		1: "Darwin",
+	}
+	for i, mod := range mods {
+		want := wantByNode[i]
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			v, err := mod.store.Get("config")
+			if err == nil && v.Name == want {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		got, err := mod.store.Get("config")
+		if err != nil {
+			t.Fatalf("node-%d get: %v", i, err)
+		}
+		if got.Name != want {
+			t.Fatalf("node-%d expected %q, got %q", i, want, got.Name)
+		}
+	}
+
+	// Also check List() returns the resolved value.
+	for i, mod := range mods {
+		items, err := mod.store.List()
+		if err != nil {
+			t.Fatalf("node-%d list: %v", i, err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("node-%d expected 1 item, got %d", i, len(items))
+		}
+	}
+}

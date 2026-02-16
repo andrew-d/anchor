@@ -123,17 +123,23 @@ func (c *CLI) cmdServe(args []string) int {
 func cmdGet(args []string) int {
 	fs := flag.NewFlagSet("get", flag.ExitOnError)
 	server := fs.String("server", "localhost:11000", "HTTP server address")
+	scope := fs.String("scope", "", "Scope filter (e.g. node:host1, os:linux)")
 	fs.Parse(args)
 
 	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "Usage: anchor get [--server ADDR] <kind> <key>")
+		fmt.Fprintln(os.Stderr, "Usage: anchor get [--server ADDR] [--scope SCOPE] <kind> <key>")
 		return 1
 	}
 
 	kind := fs.Arg(0)
 	key := fs.Arg(1)
 
-	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key))
+	u := fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key)
+	if *scope != "" {
+		u += "?scope=" + *scope
+	}
+
+	resp, err := http.Get(u)
 	if err != nil {
 		slog.Error("request failed", "err", err)
 		return 1
@@ -154,10 +160,11 @@ func cmdGet(args []string) int {
 func cmdSet(args []string) int {
 	fs := flag.NewFlagSet("set", flag.ExitOnError)
 	server := fs.String("server", "localhost:11000", "HTTP server address")
+	scope := fs.String("scope", "", "Scope filter (e.g. node:host1, os:linux)")
 	fs.Parse(args)
 
 	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "Usage: anchor set [--server ADDR] <kind> <key> < value.json")
+		fmt.Fprintln(os.Stderr, "Usage: anchor set [--server ADDR] [--scope SCOPE] <kind> <key> < value.json")
 		return 1
 	}
 
@@ -174,10 +181,12 @@ func cmdSet(args []string) int {
 		return 1
 	}
 
-	req, err := http.NewRequest(http.MethodPut,
-		fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key),
-		bytes.NewReader(body),
-	)
+	u := fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key)
+	if *scope != "" {
+		u += "?scope=" + *scope
+	}
+
+	req, err := http.NewRequest(http.MethodPut, u, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("failed to create request", "err", err)
 		return 1
@@ -202,20 +211,23 @@ func cmdSet(args []string) int {
 func cmdDelete(args []string) int {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	server := fs.String("server", "localhost:11000", "HTTP server address")
+	scope := fs.String("scope", "", "Scope filter (e.g. node:host1, os:linux)")
 	fs.Parse(args)
 
 	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "Usage: anchor delete [--server ADDR] <kind> <key>")
+		fmt.Fprintln(os.Stderr, "Usage: anchor delete [--server ADDR] [--scope SCOPE] <kind> <key>")
 		return 1
 	}
 
 	kind := fs.Arg(0)
 	key := fs.Arg(1)
 
-	req, err := http.NewRequest(http.MethodDelete,
-		fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key),
-		nil,
-	)
+	u := fmt.Sprintf("http://%s/api/v1/%s/%s", *server, kind, key)
+	if *scope != "" {
+		u += "?scope=" + *scope
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, u, nil)
 	if err != nil {
 		slog.Error("failed to create request", "err", err)
 		return 1
@@ -261,6 +273,22 @@ func cmdList(args []string) int {
 		return 1
 	}
 
-	io.Copy(os.Stdout, resp.Body)
+	var entries []struct {
+		Scope string          `json:"scope"`
+		Key   string          `json:"key"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		slog.Error("failed to decode response", "err", err)
+		return 1
+	}
+
+	for _, e := range entries {
+		scope := e.Scope
+		if scope == "" {
+			scope = "(global)"
+		}
+		fmt.Printf("[%s] %s = %s\n", scope, e.Key, string(e.Value))
+	}
 	return 0
 }

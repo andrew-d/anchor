@@ -25,6 +25,10 @@ type NodeOptions struct {
 	// Nonvoter, when true, causes this node to join as a non-voting
 	// member. Ignored for node 0 (the bootstrap node is always a voter).
 	Nonvoter bool
+
+	// OS overrides the detected operating system for this node.
+	// If empty, the node uses runtime.GOOS.
+	OS string
 }
 
 // ClusterOptions configures a test cluster created by NewWithOptions.
@@ -69,14 +73,18 @@ func NewWithOptions(t *testing.T, opts ClusterOptions) *Cluster {
 	logger := slogt.New(t)
 
 	// Bootstrap node 0.
-	apps[0] = anchor.New(anchor.Config{
+	node0Cfg := anchor.Config{
 		DataDir:    t.TempDir(),
 		ListenAddr: "127.0.0.1:0",
 		HTTPAddr:   "127.0.0.1:0",
 		NodeID:     "node-0",
 		Bootstrap:  true,
 		Logger:     logger,
-	})
+	}
+	if no, ok := opts.NodeOptions[0]; ok {
+		node0Cfg.OS = no.OS
+	}
+	apps[0] = anchor.New(node0Cfg)
 	if opts.ModsFn != nil {
 		for _, m := range opts.ModsFn(0) {
 			apps[0].RegisterModule(m)
@@ -104,6 +112,7 @@ func NewWithOptions(t *testing.T, opts ClusterOptions) *Cluster {
 		}
 		if no, ok := opts.NodeOptions[i]; ok {
 			cfg.Nonvoter = no.Nonvoter
+			cfg.OS = no.OS
 		}
 		apps[i] = anchor.New(cfg)
 		if opts.ModsFn != nil {

@@ -14,6 +14,7 @@ const (
 type Command struct {
 	Type  CommandType     `json:"type"`
 	Kind  string          `json:"kind"`
+	Scope string          `json:"scope,omitempty"`
 	Key   string          `json:"key"`
 	Value json.RawMessage `json:"value,omitempty"`
 }

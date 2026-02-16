@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -53,6 +54,10 @@ type Config struct {
 	// in elections or commit quorum. Only meaningful when JoinAddr is set.
 	Nonvoter bool
 
+	// OS overrides the detected operating system for scope matching.
+	// If empty, defaults to runtime.GOOS.
+	OS string
+
 	// Logger is the structured logger for the App. If nil, [slog.Default] is
 	// used.
 	Logger *slog.Logger
@@ -62,6 +67,7 @@ type Config struct {
 // API, and user-defined modules.
 type App struct {
 	config       Config
+	nodeInfo     NodeInfo
 	db           *sql.DB
 	raft         *raft.Raft
 	watches      *watchHub
@@ -146,6 +152,16 @@ func (a *App) Problems() []Problem {
 // canceled or an error occurs during startup.
 func (a *App) Start(ctx context.Context) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
+
+	// Populate node info for scope resolution.
+	osName := a.config.OS
+	if osName == "" {
+		osName = runtime.GOOS
+	}
+	a.nodeInfo = NodeInfo{
+		ID: a.config.NodeID,
+		OS: osName,
+	}
 
 	// 1. Open single SQLite database and set PRAGMAs.
 	if err := os.MkdirAll(a.config.DataDir, 0o700); err != nil {
@@ -433,7 +449,7 @@ func (a *App) leaderHTTPAddr() (string, error) {
 	}
 
 	f := (*fsm)(a)
-	raw, err := f.fsmGet(nodeMetaKind, string(leaderID))
+	raw, err := f.fsmGet(nodeMetaKind, "", string(leaderID))
 	if err != nil {
 		return "", err
 	}

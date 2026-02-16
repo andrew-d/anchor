@@ -61,17 +61,26 @@ func Register[T Kinded](app *App) *TypedStore[T] {
 // TypedStore provides type-safe access to a single configuration kind.
 // Reads go directly to the local FSM state (eventual consistency).
 // Writes are applied through Raft (leader only).
+//
+// List and Get return the resolved view for this node: for each base key,
+// only the highest-priority matching scope is returned.
 type TypedStore[T Kinded] struct {
 	app  *App
 	kind string
 }
 
-// Get returns the value for the given key from local FSM state.
-// Returns the zero value of T and no error if the key does not exist.
+// Get returns the resolved value for the given key from local FSM state.
+// It collects all scoped entries for the key and returns the one with the
+// highest priority that matches this node.
+// Returns the zero value of T and no error if no matching entry exists.
 func (s *TypedStore[T]) Get(key string) (T, error) {
 	var zero T
 	f := (*fsm)(s.app)
-	raw, err := f.fsmGet(s.kind, key)
+	entries, err := f.fsmGetAllScopes(s.kind, key)
+	if err != nil {
+		return zero, err
+	}
+	raw, err := resolveEntries(entries, s.app.nodeInfo)
 	if err != nil {
 		return zero, err
 	}
@@ -85,26 +94,48 @@ func (s *TypedStore[T]) Get(key string) (T, error) {
 	return val, nil
 }
 
-// List returns all entries for this kind from local FSM state.
+// List returns all entries for this kind from local FSM state, resolved
+// for this node. For each base key, only the highest-priority matching
+// scope is returned.
 func (s *TypedStore[T]) List() (map[string]T, error) {
 	f := (*fsm)(s.app)
-	rawMap, err := f.fsmList(s.kind)
+	allEntries, err := f.fsmListAll(s.kind)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]T, len(rawMap))
-	for k, raw := range rawMap {
+
+	// Group by key.
+	byKey := make(map[string][]fsmEntry)
+	for _, e := range allEntries {
+		byKey[e.Key] = append(byKey[e.Key], e)
+	}
+
+	result := make(map[string]T, len(byKey))
+	for key, entries := range byKey {
+		raw, err := resolveEntries(entries, s.app.nodeInfo)
+		if err != nil {
+			return nil, fmt.Errorf("resolve key %q: %w", key, err)
+		}
+		if raw == nil {
+			continue
+		}
 		var val T
 		if err := json.Unmarshal(raw, &val); err != nil {
-			return nil, fmt.Errorf("unmarshal key %q: %w", k, err)
+			return nil, fmt.Errorf("unmarshal key %q: %w", key, err)
 		}
-		result[k] = val
+		result[key] = val
 	}
 	return result, nil
 }
 
-// Set sets a value through Raft consensus. Only works on the leader.
+// Set sets a value at global scope through Raft consensus. Only works on the leader.
 func (s *TypedStore[T]) Set(key string, value T) error {
+	return s.SetScoped("", key, value)
+}
+
+// SetScoped sets a value at the given scope through Raft consensus. Only works on the leader.
+// An empty scope string means global scope.
+func (s *TypedStore[T]) SetScoped(scope string, key string, value T) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -112,46 +143,28 @@ func (s *TypedStore[T]) Set(key string, value T) error {
 	cmd := Command{
 		Type:  CmdSet,
 		Kind:  s.kind,
+		Scope: scope,
 		Key:   key,
 		Value: data,
 	}
-	b, err := json.Marshal(cmd)
-	if err != nil {
-		return err
-	}
-	f := s.app.raft.Apply(b, raftTimeout)
-	if err := f.Error(); err != nil {
-		return err
-	}
-	if resp := f.Response(); resp != nil {
-		if err, ok := resp.(error); ok {
-			return err
-		}
-	}
-	return nil
+	return s.app.applyCommand(cmd)
 }
 
-// Delete deletes a key through Raft consensus. Only works on the leader.
+// Delete deletes a key at global scope through Raft consensus. Only works on the leader.
 func (s *TypedStore[T]) Delete(key string) error {
+	return s.DeleteScoped("", key)
+}
+
+// DeleteScoped deletes a key at the given scope through Raft consensus. Only works on the leader.
+// An empty scope string means global scope.
+func (s *TypedStore[T]) DeleteScoped(scope string, key string) error {
 	cmd := Command{
-		Type: CmdDelete,
-		Kind: s.kind,
-		Key:  key,
+		Type:  CmdDelete,
+		Kind:  s.kind,
+		Scope: scope,
+		Key:   key,
 	}
-	b, err := json.Marshal(cmd)
-	if err != nil {
-		return err
-	}
-	f := s.app.raft.Apply(b, raftTimeout)
-	if err := f.Error(); err != nil {
-		return err
-	}
-	if resp := f.Response(); resp != nil {
-		if err, ok := resp.(error); ok {
-			return err
-		}
-	}
-	return nil
+	return s.app.applyCommand(cmd)
 }
 
 // WatchStore returns a watcher that delivers the full state (all entries) for
@@ -187,6 +200,31 @@ func (a *App) applyCommand(cmd Command) error {
 		}
 	}
 	return nil
+}
+
+// resolveEntries picks the highest-priority entry that matches the node info.
+// Returns nil if no entry matches.
+func resolveEntries(entries []fsmEntry, info NodeInfo) (json.RawMessage, error) {
+	var best *fsmEntry
+	bestPriority := -1
+	for i := range entries {
+		scope, err := ParseScope(entries[i].Scope)
+		if err != nil {
+			return nil, fmt.Errorf("parse scope %q: %w", entries[i].Scope, err)
+		}
+		if !scope.Matches(info) {
+			continue
+		}
+		p := scope.Priority()
+		if p > bestPriority {
+			bestPriority = p
+			best = &entries[i]
+		}
+	}
+	if best == nil {
+		return nil, nil
+	}
+	return best.Value, nil
 }
 
 // Verify interface compliance.

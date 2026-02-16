@@ -36,6 +36,7 @@ func timeAgo(t time.Time) string {
 type uiData struct {
 	NodeID       string
 	DeploymentID string
+	NodeOS       string
 	RaftState    string
 	LeaderID     string
 	LeaderAddr   string
@@ -86,19 +87,20 @@ var apiEndpoints = []apiEndpoint{
 		Method:      "GET",
 		Pattern:     "/api/v1/{kind}",
 		Handler:     (*App).handleList,
-		Description: "List all entries of a given kind.",
+		Description: "List all entries of a given kind, including scope information.",
 		Example: `GET /api/v1/sshkeys
 
 200 OK
-{"alice": {"public_key": "ssh-ed25519 AAAA..."}, "bob": {"public_key": "ssh-ed25519 BBBB..."}}`,
+[{"scope":"","key":"alice","value":{"public_key":"ssh-ed25519 AAAA..."}},
+ {"scope":"node:host1","key":"alice","value":{"public_key":"ssh-ed25519 BBBB..."}}]`,
 		Section: "Configuration API",
 	},
 	{
 		Method:      "GET",
 		Pattern:     "/api/v1/{kind}/{key}",
 		Handler:     (*App).handleGet,
-		Description: "Get a single entry. Returns 404 if the key does not exist.",
-		Example: `GET /api/v1/sshkeys/alice
+		Description: "Get a single entry. Use ?scope= to read a specific scope (default: global). Returns 404 if the key does not exist.",
+		Example: `GET /api/v1/sshkeys/alice?scope=node:host1
 
 200 OK
 {"public_key": "ssh-ed25519 AAAA..."}`,
@@ -108,8 +110,8 @@ var apiEndpoints = []apiEndpoint{
 		Method:      "PUT",
 		Pattern:     "/api/v1/{kind}/{key}",
 		Handler:     (*App).handleSet,
-		Description: "Create or update an entry. Body must be valid JSON. If the kind has a registered type, the value is validated against it. Returns 204 No Content on success. Redirects to the leader (307) on followers.",
-		Example: `PUT /api/v1/sshkeys/alice
+		Description: "Create or update an entry. Use ?scope= to write at a specific scope (default: global). Body must be valid JSON. If the kind has a registered type, the value is validated against it. Returns 204 No Content on success. Redirects to the leader (307) on followers.",
+		Example: `PUT /api/v1/sshkeys/alice?scope=node:host1
 Content-Type: application/json
 
 {"public_key": "ssh-ed25519 AAAA..."}
@@ -121,8 +123,8 @@ Content-Type: application/json
 		Method:      "DELETE",
 		Pattern:     "/api/v1/{kind}/{key}",
 		Handler:     (*App).handleDelete,
-		Description: "Delete an entry. Returns 204 No Content on success. Redirects to the leader (307) on followers.",
-		Example: `DELETE /api/v1/sshkeys/alice
+		Description: "Delete an entry. Use ?scope= to delete at a specific scope (default: global). Returns 204 No Content on success. Redirects to the leader (307) on followers.",
+		Example: `DELETE /api/v1/sshkeys/alice?scope=node:host1
 
 204 No Content`,
 		Section: "Configuration API",
@@ -235,6 +237,7 @@ func (a *App) collectUIData() uiData {
 	return uiData{
 		NodeID:       a.config.NodeID,
 		DeploymentID: a.deploymentID,
+		NodeOS:       a.nodeInfo.OS,
 		RaftState:    raftState,
 		LeaderID:     string(leaderID),
 		LeaderAddr:   string(leaderAddr),

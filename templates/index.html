@@ -14,10 +14,18 @@
     </header>
 
     <div class="card">
-        <h2>Cluster Status</h2>
+        <h2>Node Info</h2>
         <dl>
             <dt>Node ID <span class="info" data-tip="Unique identifier for this node in the cluster">i</span></dt>
             <dd>{{.NodeID}}</dd>
+            <dt>OS <span class="info" data-tip="Operating system of this node, used for scope matching">i</span></dt>
+            <dd>{{.NodeOS}}</dd>
+        </dl>
+    </div>
+
+    <div class="card">
+        <h2>Cluster Status</h2>
+        <dl>
             <dt>Raft State <span class="info" data-tip="Current consensus role: Leader, Follower, or Candidate">i</span></dt>
             <dd>
                 {{if eq .RaftState "Leader"}}
