@@ -26,6 +26,32 @@ async function fetchJSON(url) {
     return res.json();
 }
 
+async function postJSON(url, body) {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+}
+
+async function putJSON(url, body) {
+    const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+}
+
+async function deleteJSON(url) {
+    const res = await fetch(url, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+}
+
 // --- Components (Dashboard, AgentDetail) ---
 
 function Dashboard() {
@@ -123,17 +149,246 @@ function AgentDetail({ id }) {
     `;
 }
 
+// --- Tags Component ---
+
+function Tags() {
+    const [tags, setTags] = useState(null);
+    const [error, setError] = useState(null);
+    const [newTagName, setNewTagName] = useState('');
+    const [isCreating, setIsCreating] = useState(false);
+
+    const loadTags = () => {
+        fetchJSON('/api/tags')
+            .then(data => setTags(data.tags || []))
+            .catch(e => setError(e.message));
+    };
+
+    useEffect(() => {
+        loadTags();
+    }, []);
+
+    const handleCreate = async (e) => {
+        e.preventDefault();
+        if (!newTagName.trim()) return;
+        setIsCreating(true);
+        try {
+            await postJSON('/api/tags', { name: newTagName });
+            setNewTagName('');
+            loadTags();
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setIsCreating(false);
+        }
+    };
+
+    const handleDelete = async (id) => {
+        if (!confirm('Delete this tag?')) return;
+        try {
+            await deleteJSON(`/api/tags/${id}`);
+            loadTags();
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
+    if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
+    if (!tags) return html`<div class="container"><p>Loading...</p></div>`;
+
+    return html`
+        <div class="container">
+            <p><a href="#/">← Dashboard</a></p>
+            <h2>Tags</h2>
+
+            <div class="form-section">
+                <form onSubmit=${handleCreate}>
+                    <input
+                        type="text"
+                        placeholder="New tag name"
+                        value=${newTagName}
+                        onInput=${e => setNewTagName(e.target.value)}
+                        disabled=${isCreating}
+                    />
+                    <button type="submit" disabled=${isCreating}>${isCreating ? 'Creating...' : 'Create Tag'}</button>
+                </form>
+            </div>
+
+            ${tags.length === 0 && html`<p>No tags yet.</p>`}
+            ${tags.length > 0 && html`
+                <div class="tag-list">
+                    ${tags.map(tag => html`
+                        <div class="tag-item">
+                            <a href="#/tags/${tag.id}">${tag.name}</a>
+                            <button onClick=${() => handleDelete(tag.id)} class="btn-delete">Delete</button>
+                        </div>
+                    `)}
+                </div>
+            `}
+        </div>
+    `;
+}
+
+function TagDetail({ id }) {
+    const [tag, setTag] = useState(null);
+    const [assignments, setAssignments] = useState([]);
+    const [modules, setModules] = useState([]);
+    const [error, setError] = useState(null);
+    const [selectedModule, setSelectedModule] = useState('');
+    const [isAdding, setIsAdding] = useState(false);
+
+    useEffect(() => {
+        Promise.all([
+            fetchJSON('/api/tags').then(data => {
+                const t = data.tags.find(x => x.id === parseInt(id));
+                setTag(t);
+            }),
+            fetchJSON('/api/assignments').then(data => {
+                setAssignments((data.assignments || []).filter(a => a.tag_id === parseInt(id)));
+            }),
+            fetchJSON('/api/modules').then(data => setModules(data.modules || []))
+        ]).catch(e => setError(e.message));
+    }, [id]);
+
+    const handleAddModule = async (e) => {
+        e.preventDefault();
+        if (!selectedModule) return;
+        setIsAdding(true);
+        try {
+            await postJSON('/api/assignments', { module_name: selectedModule, tag_id: parseInt(id) });
+            setSelectedModule('');
+            const data = await fetchJSON('/api/assignments');
+            setAssignments((data.assignments || []).filter(a => a.tag_id === parseInt(id)));
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setIsAdding(false);
+        }
+    };
+
+    const handleRemoveModule = async (assignmentId) => {
+        if (!confirm('Remove this assignment?')) return;
+        try {
+            await deleteJSON(`/api/assignments/${assignmentId}`);
+            setAssignments(assignments.filter(a => a.id !== assignmentId));
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
+    if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
+    if (!tag) return html`<div class="container"><p>Loading...</p></div>`;
+
+    return html`
+        <div class="container">
+            <p><a href="#/tags">← Tags</a></p>
+            <h2>${tag.name}</h2>
+
+            <h3>Modules</h3>
+            ${assignments.length === 0 && html`<p>No modules assigned to this tag.</p>`}
+            ${assignments.length > 0 && html`
+                <div class="assignment-list">
+                    ${assignments.map(a => html`
+                        <div class="assignment-item">
+                            <span>${a.module_name}</span>
+                            <button onClick=${() => handleRemoveModule(a.id)} class="btn-delete">Remove</button>
+                        </div>
+                    `)}
+                </div>
+            `}
+
+            <div class="form-section">
+                <form onSubmit=${handleAddModule}>
+                    <select value=${selectedModule} onInput=${e => setSelectedModule(e.target.value)} disabled=${isAdding}>
+                        <option value="">Select a module...</option>
+                        ${modules.map(m => html`<option value=${m.filename}>${m.name}</option>`)}
+                    </select>
+                    <button type="submit" disabled=${isAdding || !selectedModule}>${isAdding ? 'Adding...' : 'Add Module'}</button>
+                </form>
+            </div>
+        </div>
+    `;
+}
+
+// --- Modules Component ---
+
+function ModulesList() {
+    const [modules, setModules] = useState(null);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        fetchJSON('/api/modules')
+            .then(data => setModules(data.modules || []))
+            .catch(e => setError(e.message));
+    }, []);
+
+    if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
+    if (!modules) return html`<div class="container"><p>Loading...</p></div>`;
+
+    return html`
+        <div class="container">
+            <p><a href="#/">← Dashboard</a></p>
+            <h2>Modules</h2>
+
+            ${modules.length === 0 && html`<p>No modules loaded.</p>`}
+            ${modules.length > 0 && html`
+                <div class="module-list">
+                    ${modules.map(m => html`
+                        <div class="module-item">
+                            <div class="module-item-header">
+                                <h4>${m.name}</h4>
+                                <span class="module-filename">${m.filename}</span>
+                            </div>
+                            <p class="module-description">${m.description}</p>
+                        </div>
+                    `)}
+                </div>
+            `}
+        </div>
+    `;
+}
+
 // --- App Shell ---
+
+function Header() {
+    return html`
+        <header>
+            <div style="max-width: 960px; margin: 0 auto; padding: 0 1rem; display: flex; justify-content: space-between; align-items: center;">
+                <h1><a href="#/" style="color: white; text-decoration: none;">Anchor</a></h1>
+                <nav style="display: flex; gap: 2rem;">
+                    <a href="#/" style="color: white; text-decoration: none;">Dashboard</a>
+                    <a href="#/tags" style="color: white; text-decoration: none;">Tags</a>
+                    <a href="#/modules" style="color: white; text-decoration: none;">Modules</a>
+                </nav>
+            </div>
+        </header>
+    `;
+}
 
 function App() {
     const route = useHashRoute();
 
     // Route matching
-    if (route.startsWith('/agents/')) {
+    let page;
+    if (route === '/' || route === '') {
+        page = html`<${Dashboard} />`;
+    } else if (route === '/tags') {
+        page = html`<${Tags} />`;
+    } else if (route.startsWith('/tags/')) {
+        const id = route.slice('/tags/'.length);
+        page = html`<${TagDetail} id=${id} />`;
+    } else if (route === '/modules') {
+        page = html`<${ModulesList} />`;
+    } else if (route.startsWith('/agents/')) {
         const id = route.slice('/agents/'.length);
-        return html`<${AgentDetail} id=${id} />`;
+        page = html`<${AgentDetail} id=${id} />`;
+    } else {
+        page = html`<${Dashboard} />`;
     }
-    return html`<${Dashboard} />`;
+
+    return html`
+        <${Header} />
+        ${page}
+    `;
 }
 
 render(html`<${App} />`, document.getElementById('app'));

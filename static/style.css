@@ -94,3 +94,122 @@ header a { color: white; text-decoration: none; }
     font-size: 0.75rem;
     margin-right: 0.25rem;
 }
+
+/* Forms */
+.form-section {
+    background: white;
+    padding: 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    margin: 1.5rem 0;
+}
+
+.form-section form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.form-section input,
+.form-section select {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.form-section button,
+.btn-delete {
+    padding: 0.5rem 1rem;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.form-section button:hover:not(:disabled),
+.btn-delete:hover {
+    background: #1d4ed8;
+}
+
+.form-section button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+.btn-delete {
+    background: #dc2626;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+}
+
+.btn-delete:hover {
+    background: #b91c1c;
+}
+
+/* Lists */
+.tag-list,
+.assignment-list,
+.module-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.tag-item,
+.assignment-item,
+.module-item {
+    background: white;
+    border: 1px solid #e5e7eb;
+    padding: 0.75rem;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tag-item a,
+.assignment-item span {
+    flex: 1;
+}
+
+.tag-item a {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.tag-item a:hover {
+    text-decoration: underline;
+}
+
+.module-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.module-item-header {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+    width: 100%;
+}
+
+.module-item-header h4 {
+    margin: 0;
+    font-weight: 600;
+}
+
+.module-filename {
+    font-size: 0.875rem;
+    color: #6b7280;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+.module-description {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin: 0;
+}
