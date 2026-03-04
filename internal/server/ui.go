@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/andrew-d/anchor/internal/db"
@@ -259,6 +260,373 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		Agent:         agentDetail,
 		Tags:          tagResponses,
 		ModuleResults: moduleResultResponses,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Tag Management API ---
+
+// ListTagsResponse is the response for GET /api/tags.
+type ListTagsResponse struct {
+	Tags []UITagResponse `json:"tags"`
+}
+
+// CreateTagRequest is the request for POST /api/tags.
+type CreateTagRequest struct {
+	Name string `json:"name"`
+}
+
+// OKResponse is used for simple success responses.
+type OKResponse struct {
+	OK bool `json:"ok"`
+}
+
+// handleListTags handles GET /api/tags.
+func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	tags, err := s.store.ListTags(ctx)
+	if err != nil {
+		slog.Error("failed to list tags", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	tagResponses := []UITagResponse{}
+	for _, tag := range tags {
+		tagResponses = append(tagResponses, UITagResponse{
+			ID:   tag.ID,
+			Name: tag.Name,
+		})
+	}
+
+	resp := ListTagsResponse{
+		Tags: tagResponses,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// handleCreateTag handles POST /api/tags.
+func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req CreateTagRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	tag, err := s.store.CreateTag(ctx, req.Name)
+	if err != nil {
+		slog.Error("failed to create tag", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := UITagResponse{
+		ID:   tag.ID,
+		Name: tag.Name,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// handleDeleteTag handles DELETE /api/tags/{id}.
+func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	idStr := r.PathValue("id")
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid tag id", http.StatusBadRequest)
+		return
+	}
+
+	err = s.store.DeleteTag(ctx, id)
+	if err != nil {
+		slog.Error("failed to delete tag", "tag_id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := OKResponse{OK: true}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Agent Tags API ---
+
+// SetAgentTagsRequest is the request for PUT /api/agents/{id}/tags.
+type SetAgentTagsRequest struct {
+	TagIDs []int64 `json:"tag_ids"`
+}
+
+// handleSetAgentTags handles PUT /api/agents/{id}/tags.
+func (s *Server) handleSetAgentTags(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	agentID := r.PathValue("id")
+
+	var req SetAgentTagsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	err := s.store.SetAgentTags(ctx, agentID, req.TagIDs)
+	if err != nil {
+		slog.Error("failed to set agent tags", "agent_id", agentID, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := OKResponse{OK: true}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Module Assignment API ---
+
+// ModuleAssignmentResponse represents a module assignment in API responses.
+type ModuleAssignmentResponse struct {
+	ID         int64   `json:"id"`
+	ModuleName string  `json:"module_name"`
+	AgentID    *string `json:"agent_id"`
+	TagID      *int64  `json:"tag_id"`
+}
+
+// ListAssignmentsResponse is the response for GET /api/assignments.
+type ListAssignmentsResponse struct {
+	Assignments []ModuleAssignmentResponse `json:"assignments"`
+}
+
+// CreateAssignmentRequest is the request for POST /api/assignments.
+type CreateAssignmentRequest struct {
+	ModuleName string  `json:"module_name"`
+	AgentID    *string `json:"agent_id"`
+	TagID      *int64  `json:"tag_id"`
+}
+
+// handleListAssignments handles GET /api/assignments.
+func (s *Server) handleListAssignments(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	assignments, err := s.store.ListAssignments(ctx)
+	if err != nil {
+		slog.Error("failed to list assignments", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	assignmentResponses := []ModuleAssignmentResponse{}
+	for _, assignment := range assignments {
+		assignmentResponses = append(assignmentResponses, ModuleAssignmentResponse{
+			ID:         assignment.ID,
+			ModuleName: assignment.ModuleName,
+			AgentID:    assignment.AgentID,
+			TagID:      assignment.TagID,
+		})
+	}
+
+	resp := ListAssignmentsResponse{
+		Assignments: assignmentResponses,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// handleCreateAssignment handles POST /api/assignments.
+func (s *Server) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req CreateAssignmentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate exactly one of agentID or tagID is set
+	if (req.AgentID == nil && req.TagID == nil) || (req.AgentID != nil && req.TagID != nil) {
+		http.Error(w, "exactly one of agent_id or tag_id must be set", http.StatusBadRequest)
+		return
+	}
+
+	err := s.store.AssignModule(ctx, req.ModuleName, req.AgentID, req.TagID)
+	if err != nil {
+		slog.Error("failed to assign module", "module_name", req.ModuleName, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the created assignment to return it
+	assignments, err := s.store.ListAssignments(ctx)
+	if err != nil {
+		slog.Error("failed to list assignments after create", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Find the most recently created assignment matching our criteria
+	var createdAssignment *ModuleAssignmentResponse
+	for i := len(assignments) - 1; i >= 0; i-- {
+		a := assignments[i]
+		if a.ModuleName == req.ModuleName {
+			matches := false
+			if req.AgentID != nil && a.AgentID != nil && *a.AgentID == *req.AgentID {
+				matches = true
+			} else if req.TagID != nil && a.TagID != nil && *a.TagID == *req.TagID {
+				matches = true
+			}
+			if matches {
+				createdAssignment = &ModuleAssignmentResponse{
+					ID:         a.ID,
+					ModuleName: a.ModuleName,
+					AgentID:    a.AgentID,
+					TagID:      a.TagID,
+				}
+				break
+			}
+		}
+	}
+
+	if createdAssignment == nil {
+		slog.Error("could not find created assignment", "module_name", req.ModuleName)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(createdAssignment); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// handleDeleteAssignment handles DELETE /api/assignments/{id}.
+func (s *Server) handleDeleteAssignment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	idStr := r.PathValue("id")
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid assignment id", http.StatusBadRequest)
+		return
+	}
+
+	err = s.store.UnassignModule(ctx, id)
+	if err != nil {
+		slog.Error("failed to unassign module", "assignment_id", id, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := OKResponse{OK: true}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Effective Modules API ---
+
+// AgentModuleDetailResponse represents a module with source info.
+type AgentModuleDetailResponse struct {
+	Name         string `json:"name"`
+	Source       string `json:"source"`
+	AssignmentID int64  `json:"assignment_id"`
+}
+
+// AgentEffectiveModulesResponse is the response for GET /api/agents/{id}/modules.
+type AgentEffectiveModulesResponse struct {
+	Modules []AgentModuleDetailResponse `json:"modules"`
+}
+
+// handleGetAgentModules handles GET /api/agents/{id}/modules.
+func (s *Server) handleGetAgentModules(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	agentID := r.PathValue("id")
+
+	moduleDetails, err := s.store.GetAgentModuleDetails(ctx, agentID)
+	if err != nil {
+		slog.Error("failed to get agent module details", "agent_id", agentID, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	moduleResponses := []AgentModuleDetailResponse{}
+	for _, md := range moduleDetails {
+		moduleResponses = append(moduleResponses, AgentModuleDetailResponse{
+			Name:         md.ModuleName,
+			Source:       md.Source,
+			AssignmentID: md.AssignmentID,
+		})
+	}
+
+	resp := AgentEffectiveModulesResponse{
+		Modules: moduleResponses,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Modules List API ---
+
+// ModuleMetadataResponse represents a module in the modules list.
+type ModuleMetadataResponse struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Filename    string `json:"filename"`
+}
+
+// ListModulesResponse is the response for GET /api/modules.
+type ListModulesResponse struct {
+	Modules []ModuleMetadataResponse `json:"modules"`
+}
+
+// handleListModules handles GET /api/modules.
+func (s *Server) handleListModules(w http.ResponseWriter, r *http.Request) {
+	modules, err := s.loader.LoadAll()
+	if err != nil {
+		slog.Error("failed to load modules", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	moduleResponses := []ModuleMetadataResponse{}
+	for _, module := range modules {
+		moduleResponses = append(moduleResponses, ModuleMetadataResponse{
+			Name:        module.Name,
+			Description: module.Description,
+			Filename:    module.Filename,
+		})
+	}
+
+	resp := ListModulesResponse{
+		Modules: moduleResponses,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

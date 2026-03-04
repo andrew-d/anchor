@@ -52,6 +52,15 @@ func (s *Server) Run() error {
 	mux.HandleFunc("POST /api/report", s.handleReport)
 	mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/agents/{id}", s.handleGetAgent)
+	mux.HandleFunc("GET /api/tags", s.handleListTags)
+	mux.HandleFunc("POST /api/tags", s.handleCreateTag)
+	mux.HandleFunc("DELETE /api/tags/{id}", s.handleDeleteTag)
+	mux.HandleFunc("PUT /api/agents/{id}/tags", s.handleSetAgentTags)
+	mux.HandleFunc("GET /api/assignments", s.handleListAssignments)
+	mux.HandleFunc("POST /api/assignments", s.handleCreateAssignment)
+	mux.HandleFunc("DELETE /api/assignments/{id}", s.handleDeleteAssignment)
+	mux.HandleFunc("GET /api/agents/{id}/modules", s.handleGetAgentModules)
+	mux.HandleFunc("GET /api/modules", s.handleListModules)
 
 	// Serve static files from embedded filesystem
 	staticSub, err := fs.Sub(anchostatic.FS, ".")
