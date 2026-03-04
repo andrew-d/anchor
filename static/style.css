@@ -1,0 +1,96 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    line-height: 1.5;
+}
+
+.container { max-width: 960px; margin: 0 auto; padding: 1rem; }
+
+header {
+    background: #1a1a2e;
+    color: white;
+    padding: 0.75rem 1rem;
+}
+header h1 { font-size: 1.25rem; font-weight: 600; }
+header a { color: white; text-decoration: none; }
+
+/* Health status groups */
+.status-group { margin-bottom: 1.5rem; }
+.status-group h2 {
+    font-size: 1rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px 4px 0 0;
+}
+.group-unhealthy h2 { background: #fee2e2; color: #991b1b; }
+.group-stale h2 { background: #fef3c7; color: #92400e; }
+.group-healthy h2 { background: #dcfce7; color: #166534; }
+
+/* Agent cards */
+.agent-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    padding: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.agent-card:not(:last-child) { border-bottom: none; }
+.agent-card a { color: #2563eb; text-decoration: none; }
+.agent-card a:hover { text-decoration: underline; }
+
+/* Agent detail */
+.agent-info { background: white; padding: 1rem; border: 1px solid #e5e7eb; margin-bottom: 1rem; border-radius: 4px; }
+.agent-info dt { font-weight: 600; color: #6b7280; font-size: 0.875rem; }
+.agent-info dd { margin-bottom: 0.5rem; }
+
+/* Module results */
+.module-result {
+    background: white;
+    border: 1px solid #e5e7eb;
+    margin-bottom: 0.5rem;
+    border-radius: 4px;
+}
+.module-result-header {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.module-result-header:hover { background: #f9fafb; }
+.module-output {
+    padding: 0.75rem;
+    border-top: 1px solid #e5e7eb;
+    background: #f9fafb;
+}
+.module-output pre {
+    font-size: 0.8125rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+/* Status badges */
+.badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-ok { background: #dcfce7; color: #166534; }
+.badge-changed { background: #dbeafe; color: #1e40af; }
+.badge-error { background: #fee2e2; color: #991b1b; }
+
+/* Tags */
+.tag {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    background: #e5e7eb;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-right: 0.25rem;
+}
