@@ -2,12 +2,14 @@ package server
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 
 	"github.com/andrew-d/anchor/internal/db"
 	"github.com/andrew-d/anchor/internal/module"
+	anchostatic "github.com/andrew-d/anchor/static"
 )
 
 // Server is the anchor HTTP server.
@@ -50,8 +52,20 @@ func (s *Server) Run() error {
 	mux.HandleFunc("POST /api/report", s.handleReport)
 	mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/agents/{id}", s.handleGetAgent)
+
+	// Serve static files from embedded filesystem
+	staticSub, _ := fs.Sub(anchostatic.FS, ".")
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+
+	// Serve index.html for the SPA entry point
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "anchor server")
+		data, err := anchostatic.FS.ReadFile("index.html")
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
 	})
 
 	addr := fmt.Sprintf(":%d", s.port)
