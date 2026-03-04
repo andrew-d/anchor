@@ -41,10 +41,43 @@ header a { color: white; text-decoration: none; }
 .agent-card a { color: #2563eb; text-decoration: none; }
 .agent-card a:hover { text-decoration: underline; }
 
+/* Agent subtitle (IP + UUID suffix) */
+.agent-subtitle {
+    color: #6b7280;
+    font-size: 0.75rem;
+    margin-top: 0.125rem;
+}
+
 /* Agent detail */
 .agent-info { background: white; padding: 1rem; border: 1px solid #e5e7eb; margin-bottom: 1rem; border-radius: 4px; }
 .agent-info dt { font-weight: 600; color: #6b7280; font-size: 0.875rem; }
 .agent-info dd { margin-bottom: 0.5rem; }
+
+/* Agent name edit */
+.agent-name-edit {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.agent-name-edit input {
+    padding: 0.375rem 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+.agent-name-edit button {
+    padding: 0.375rem 0.75rem;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+}
+.agent-name-edit button:hover { background: #1d4ed8; }
+.agent-name-edit .btn-cancel { background: #6b7280; }
+.agent-name-edit .btn-cancel:hover { background: #4b5563; }
 
 /* Module results */
 .module-result {

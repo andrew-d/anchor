@@ -56,6 +56,7 @@ func (s *Server) Run() error {
 	mux.HandleFunc("POST /api/tags", s.handleCreateTag)
 	mux.HandleFunc("DELETE /api/tags/{id}", s.handleDeleteTag)
 	mux.HandleFunc("PUT /api/agents/{id}/tags", s.handleSetAgentTags)
+	mux.HandleFunc("PUT /api/agents/{id}/name", s.handleSetAgentDisplayName)
 	mux.HandleFunc("GET /api/assignments", s.handleListAssignments)
 	mux.HandleFunc("POST /api/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("DELETE /api/assignments/{id}", s.handleDeleteAssignment)

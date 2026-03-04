@@ -1145,3 +1145,197 @@ func TestEffectiveModulesWithMixed(t *testing.T) {
 		t.Errorf("Expected mod_b with source 'tag:webservers', got source '%s'", source)
 	}
 }
+
+// TestSetAgentDisplayName tests PUT /api/agents/{id}/name sets the display name.
+func TestSetAgentDisplayName(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+	agent := db.Agent{
+		ID:         "agent-name-1",
+		Hostname:   "web-01",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/agents/{id}/name", s.handleSetAgentDisplayName)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	name := "Production Web Server"
+	reqBody, _ := json.Marshal(SetDisplayNameRequest{DisplayName: &name})
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/agents/agent-name-1/name", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify stored
+	retrieved, err := store.GetAgent(ctx, "agent-name-1")
+	if err != nil {
+		t.Fatalf("Failed to get agent: %v", err)
+	}
+	if retrieved.DisplayName == nil || *retrieved.DisplayName != "Production Web Server" {
+		t.Errorf("Expected display name 'Production Web Server', got %v", retrieved.DisplayName)
+	}
+}
+
+// TestSetAgentDisplayName_Empty tests PUT /api/agents/{id}/name with empty string returns 400.
+func TestSetAgentDisplayName_Empty(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+	agent := db.Agent{
+		ID:         "agent-name-2",
+		Hostname:   "web-02",
+		RemoteIP:   "10.0.0.2",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/agents/{id}/name", s.handleSetAgentDisplayName)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	empty := ""
+	reqBody, _ := json.Marshal(SetDisplayNameRequest{DisplayName: &empty})
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/agents/agent-name-2/name", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestSetAgentDisplayName_Null tests PUT /api/agents/{id}/name with null resets to nil.
+func TestSetAgentDisplayName_Null(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+	agent := db.Agent{
+		ID:         "agent-name-3",
+		Hostname:   "web-03",
+		RemoteIP:   "10.0.0.3",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	// Set a name first
+	name := "My Server"
+	if err := store.SetAgentDisplayName(ctx, "agent-name-3", &name); err != nil {
+		t.Fatalf("Failed to set display name: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/agents/{id}/name", s.handleSetAgentDisplayName)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	reqBody, _ := json.Marshal(SetDisplayNameRequest{DisplayName: nil})
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/agents/agent-name-3/name", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Verify reset
+	retrieved, err := store.GetAgent(ctx, "agent-name-3")
+	if err != nil {
+		t.Fatalf("Failed to get agent: %v", err)
+	}
+	if retrieved.DisplayName != nil {
+		t.Errorf("Expected nil display name, got %v", *retrieved.DisplayName)
+	}
+}
+
+// TestListAgentsIncludesDisplayName tests that GET /api/agents includes display_name.
+func TestListAgentsIncludesDisplayName(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+	agent := db.Agent{
+		ID:         "agent-name-4",
+		Hostname:   "web-04",
+		RemoteIP:   "10.0.0.4",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	name := "Custom Name"
+	if err := store.SetAgentDisplayName(ctx, "agent-name-4", &name); err != nil {
+		t.Fatalf("Failed to set display name: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(s.handleListAgents))
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result ListAgentsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(result.Agents) != 1 {
+		t.Fatalf("Expected 1 agent, got %d", len(result.Agents))
+	}
+
+	agentResp := result.Agents[0]
+	if agentResp.DisplayName == nil || *agentResp.DisplayName != "Custom Name" {
+		t.Errorf("Expected display_name 'Custom Name', got %v", agentResp.DisplayName)
+	}
+}

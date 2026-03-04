@@ -16,6 +16,7 @@ import (
 type UIAgentResponse struct {
 	ID           string      `json:"id"`
 	Hostname     string      `json:"hostname"`
+	DisplayName  *string     `json:"display_name"`
 	RemoteIP     string      `json:"remote_ip"`
 	OS           string      `json:"os"`
 	Arch         string      `json:"arch"`
@@ -48,14 +49,15 @@ type AgentDetailResponse struct {
 
 // UIAgentDetailResponse represents an agent in the detail response.
 type UIAgentDetailResponse struct {
-	ID         string `json:"id"`
-	Hostname   string `json:"hostname"`
-	RemoteIP   string `json:"remote_ip"`
-	OS         string `json:"os"`
-	Arch       string `json:"arch"`
-	Distro     string `json:"distro"`
-	LastSeenAt int64  `json:"last_seen_at"`
-	Health     string `json:"health"`
+	ID          string  `json:"id"`
+	Hostname    string  `json:"hostname"`
+	DisplayName *string `json:"display_name"`
+	RemoteIP    string  `json:"remote_ip"`
+	OS          string  `json:"os"`
+	Arch        string  `json:"arch"`
+	Distro      string  `json:"distro"`
+	LastSeenAt  int64   `json:"last_seen_at"`
+	Health      string  `json:"health"`
 }
 
 // UIModuleResultResponse represents a module result in the response.
@@ -142,6 +144,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		uiAgent := UIAgentResponse{
 			ID:          agent.ID,
 			Hostname:    agent.Hostname,
+			DisplayName: agent.DisplayName,
 			RemoteIP:    agent.RemoteIP,
 			OS:          agent.OS,
 			Arch:        agent.Arch,
@@ -215,6 +218,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	uiAgent := UIAgentResponse{
 		ID:          agent.ID,
 		Hostname:    agent.Hostname,
+		DisplayName: agent.DisplayName,
 		RemoteIP:    agent.RemoteIP,
 		OS:          agent.OS,
 		Arch:        agent.Arch,
@@ -247,14 +251,15 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentDetail := UIAgentDetailResponse{
-		ID:         uiAgent.ID,
-		Hostname:   uiAgent.Hostname,
-		RemoteIP:   uiAgent.RemoteIP,
-		OS:         uiAgent.OS,
-		Arch:       uiAgent.Arch,
-		Distro:     uiAgent.Distro,
-		LastSeenAt: uiAgent.LastSeenAt,
-		Health:     uiAgent.Health,
+		ID:          uiAgent.ID,
+		Hostname:    uiAgent.Hostname,
+		DisplayName: uiAgent.DisplayName,
+		RemoteIP:    uiAgent.RemoteIP,
+		OS:          uiAgent.OS,
+		Arch:        uiAgent.Arch,
+		Distro:      uiAgent.Distro,
+		LastSeenAt:  uiAgent.LastSeenAt,
+		Health:      uiAgent.Health,
 	}
 
 	resp := AgentDetailResponse{
@@ -403,6 +408,42 @@ func (s *Server) handleSetAgentTags(w http.ResponseWriter, r *http.Request) {
 
 	resp := OKResponse{OK: true}
 
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Agent Display Name API ---
+
+// SetDisplayNameRequest is the request for PUT /api/agents/{id}/name.
+type SetDisplayNameRequest struct {
+	DisplayName *string `json:"display_name"`
+}
+
+// handleSetAgentDisplayName handles PUT /api/agents/{id}/name.
+func (s *Server) handleSetAgentDisplayName(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	agentID := r.PathValue("id")
+
+	var req SetDisplayNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.DisplayName != nil && strings.TrimSpace(*req.DisplayName) == "" {
+		http.Error(w, "display name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.SetAgentDisplayName(ctx, agentID, req.DisplayName); err != nil {
+		slog.Error("failed to set agent display name", "agent_id", agentID, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := OKResponse{OK: true}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("failed to encode response", "error", err)

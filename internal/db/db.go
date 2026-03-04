@@ -10,13 +10,14 @@ var ErrNotFound = errors.New("not found")
 
 // Agent represents a single agent that checks in with the server.
 type Agent struct {
-	ID         string // UUID of the agent
-	Hostname   string
-	RemoteIP   string // IP address of the checking-in agent
-	OS         string // e.g., "linux"
-	Arch       string // e.g., "amd64"
-	Distro     string // e.g., "ubuntu-22.04"
-	LastSeenAt int64  // Unix timestamp
+	ID          string  // UUID of the agent
+	Hostname    string
+	DisplayName *string // Optional display name; nil means use hostname
+	RemoteIP    string  // IP address of the checking-in agent
+	OS          string  // e.g., "linux"
+	Arch        string  // e.g., "amd64"
+	Distro      string  // e.g., "ubuntu-22.04"
+	LastSeenAt  int64   // Unix timestamp
 }
 
 // Tag is a label that can be assigned to agents for grouping and module assignment.
@@ -57,6 +58,7 @@ type Store interface {
 	UpsertAgent(ctx context.Context, agent Agent) error
 	GetAgent(ctx context.Context, id string) (Agent, error)
 	ListAgents(ctx context.Context) ([]Agent, error)
+	SetAgentDisplayName(ctx context.Context, agentID string, name *string) error
 
 	// Tag operations
 	CreateTag(ctx context.Context, name string) (Tag, error)

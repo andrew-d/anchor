@@ -998,6 +998,79 @@ func TestGetAgentModuleDetails_NoModules(t *testing.T) {
 	}
 }
 
+func TestSetAgentDisplayName(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Set display name
+	name := "My Server"
+	if err := store.SetAgentDisplayName(ctx, agent.ID, &name); err != nil {
+		t.Fatalf("SetAgentDisplayName failed: %v", err)
+	}
+
+	retrieved, err := store.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgent failed: %v", err)
+	}
+	if retrieved.DisplayName == nil || *retrieved.DisplayName != "My Server" {
+		t.Errorf("Expected display name 'My Server', got %v", retrieved.DisplayName)
+	}
+
+	// Clear display name
+	if err := store.SetAgentDisplayName(ctx, agent.ID, nil); err != nil {
+		t.Fatalf("SetAgentDisplayName (nil) failed: %v", err)
+	}
+
+	retrieved, err = store.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgent failed: %v", err)
+	}
+	if retrieved.DisplayName != nil {
+		t.Errorf("Expected nil display name, got %v", *retrieved.DisplayName)
+	}
+}
+
+func TestUpsertAgentPreservesDisplayName(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Set display name
+	name := "Custom Name"
+	if err := store.SetAgentDisplayName(ctx, agent.ID, &name); err != nil {
+		t.Fatalf("SetAgentDisplayName failed: %v", err)
+	}
+
+	// Upsert again (simulating a checkin)
+	agent.LastSeenAt = 2000
+	agent.Hostname = "host1-updated"
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent (second) failed: %v", err)
+	}
+
+	retrieved, err := store.GetAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgent failed: %v", err)
+	}
+	if retrieved.DisplayName == nil || *retrieved.DisplayName != "Custom Name" {
+		t.Errorf("Expected display name 'Custom Name' preserved after upsert, got %v", retrieved.DisplayName)
+	}
+	if retrieved.Hostname != "host1-updated" {
+		t.Errorf("Expected hostname 'host1-updated', got %s", retrieved.Hostname)
+	}
+}
+
 // TestConcurrentUpsertAgents verifies that concurrent writes do not produce
 // SQLITE_BUSY errors, which validates that SetMaxOpenConns(1) serializes access.
 func TestConcurrentUpsertAgents(t *testing.T) {

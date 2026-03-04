@@ -81,9 +81,10 @@ function Dashboard() {
                     ${g.agents.map(a => html`
                         <div class="agent-card">
                             <div>
-                                <a href="#/agents/${a.id}">${a.hostname}</a>
+                                <a href="#/agents/${a.id}">${a.display_name || a.hostname}</a>
                                 ${' '}
                                 ${a.tags.map(t => html`<span class="tag">${t.name}</span>`)}
+                                <div class="agent-subtitle">${a.remote_ip} · ${a.id.slice(-4)}</div>
                             </div>
                             <div>
                                 <span>${a.module_count} modules</span>
@@ -107,6 +108,8 @@ function AgentDetail({ id }) {
     const [selectedTag, setSelectedTag] = useState('');
     const [selectedModule, setSelectedModule] = useState('');
     const [isAdding, setIsAdding] = useState(false);
+    const [editingName, setEditingName] = useState(false);
+    const [nameInput, setNameInput] = useState('');
 
     useEffect(() => {
         Promise.all([
@@ -181,6 +184,18 @@ function AgentDetail({ id }) {
         }
     };
 
+    const handleSaveName = async () => {
+        try {
+            const value = nameInput.trim();
+            await putJSON(`/api/agents/${id}/name`, { display_name: value || null });
+            const updatedData = await fetchJSON(`/api/agents/${id}`);
+            setData(updatedData);
+            setEditingName(false);
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
     if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
     if (!data) return html`<div class="container"><p>Loading...</p></div>`;
 
@@ -193,7 +208,16 @@ function AgentDetail({ id }) {
     return html`
         <div class="container">
             <p><a href="#/">← Dashboard</a></p>
-            <h2>${agent.hostname}</h2>
+            <h2>${agent.display_name || agent.hostname}</h2>
+            <div class="agent-name-edit">
+                ${editingName ? html`
+                    <input type="text" value=${nameInput} onInput=${e => setNameInput(e.target.value)} placeholder="Display name (empty to reset)" />
+                    <button onClick=${handleSaveName}>Save</button>
+                    <button onClick=${() => setEditingName(false)} class="btn-cancel">Cancel</button>
+                ` : html`
+                    <button onClick=${() => { setNameInput(agent.display_name || ''); setEditingName(true); }}>Edit name</button>
+                `}
+            </div>
 
             <dl class="agent-info">
                 <dt>Remote IP</dt><dd>${agent.remote_ip}</dd>

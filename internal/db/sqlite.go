@@ -51,6 +51,7 @@ func Open(filepath string) (*SQLiteStore, error) {
 CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
     hostname TEXT NOT NULL,
+    display_name TEXT,
     remote_ip TEXT NOT NULL DEFAULT '',
     os TEXT NOT NULL DEFAULT '',
     arch TEXT NOT NULL DEFAULT '',
@@ -127,9 +128,9 @@ ON CONFLICT(id) DO UPDATE SET
 // GetAgent retrieves a single agent by ID.
 func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (Agent, error) {
 	var agent Agent
-	query := `SELECT id, hostname, remote_ip, os, arch, distro, last_seen_at FROM agents WHERE id = ?`
+	query := `SELECT id, hostname, display_name, remote_ip, os, arch, distro, last_seen_at FROM agents WHERE id = ?`
 	err := s.db.QueryRowContext(ctx, query, id).Scan(
-		&agent.ID, &agent.Hostname, &agent.RemoteIP, &agent.OS, &agent.Arch, &agent.Distro, &agent.LastSeenAt,
+		&agent.ID, &agent.Hostname, &agent.DisplayName, &agent.RemoteIP, &agent.OS, &agent.Arch, &agent.Distro, &agent.LastSeenAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -142,7 +143,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (Agent, error) {
 
 // ListAgents retrieves all agents, ordered by hostname.
 func (s *SQLiteStore) ListAgents(ctx context.Context) ([]Agent, error) {
-	query := `SELECT id, hostname, remote_ip, os, arch, distro, last_seen_at FROM agents ORDER BY hostname`
+	query := `SELECT id, hostname, display_name, remote_ip, os, arch, distro, last_seen_at FROM agents ORDER BY hostname`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -153,13 +154,19 @@ func (s *SQLiteStore) ListAgents(ctx context.Context) ([]Agent, error) {
 	for rows.Next() {
 		var agent Agent
 		if err := rows.Scan(
-			&agent.ID, &agent.Hostname, &agent.RemoteIP, &agent.OS, &agent.Arch, &agent.Distro, &agent.LastSeenAt,
+			&agent.ID, &agent.Hostname, &agent.DisplayName, &agent.RemoteIP, &agent.OS, &agent.Arch, &agent.Distro, &agent.LastSeenAt,
 		); err != nil {
 			return nil, err
 		}
 		agents = append(agents, agent)
 	}
 	return agents, rows.Err()
+}
+
+// SetAgentDisplayName sets or clears the display name for an agent.
+func (s *SQLiteStore) SetAgentDisplayName(ctx context.Context, agentID string, name *string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET display_name = ? WHERE id = ?`, name, agentID)
+	return err
 }
 
 // CreateTag creates a new tag.
