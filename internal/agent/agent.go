@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -40,8 +41,8 @@ type CheckinRequest struct {
 
 // CheckinResponse is the JSON response from POST /api/checkin.
 type CheckinResponse struct {
-	PollIntervalSeconds int              `json:"poll_interval_seconds"`
-	Modules             []CheckinModule  `json:"modules"`
+	PollIntervalSeconds int             `json:"poll_interval_seconds"`
+	Modules             []CheckinModule `json:"modules"`
 }
 
 // CheckinModule is a module entry in the checkin response.
@@ -65,6 +66,19 @@ type ReportResponse struct {
 	OK bool `json:"ok"`
 }
 
+// sleep waits for the given duration or until the context is cancelled.
+// Returns true if the duration elapsed, false if the context was cancelled.
+func sleep(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
+const retryDelay = 5 * time.Second
+
 // Run performs the agent polling loop, checking in with the server, executing modules, and reporting results.
 // It accepts a context for cancellation (allows clean shutdown and testability).
 func (a *Agent) Run(ctx context.Context) error {
@@ -83,15 +97,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	slog.Debug("gathered system info", "hostname", sysInfo.Hostname, "os", sysInfo.OS, "arch", sysInfo.Arch, "distro", sysInfo.Distro)
 
 	// Polling loop
-	for {
-		// Check if context is cancelled
-		select {
-		case <-ctx.Done():
-			slog.Info("agent shutdown requested")
-			return nil
-		default:
-		}
-
+	for ctx.Err() == nil {
 		// Build checkin request
 		checkinReq := CheckinRequest{
 			ID:       agentID,
@@ -106,11 +112,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		reqBody, err := json.Marshal(checkinReq)
 		if err != nil {
 			slog.Error("failed to marshal checkin request", "error", err)
-			select {
-			case <-ctx.Done():
-				slog.Info("agent shutdown requested")
-				return nil
-			case <-time.After(5 * time.Second):
+			if !sleep(ctx, retryDelay) {
+				break
 			}
 			continue
 		}
@@ -118,11 +121,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		resp, err := http.Post(checkinURL, "application/json", bytes.NewReader(reqBody))
 		if err != nil {
 			slog.Error("checkin request failed", "error", err, "url", checkinURL)
-			select {
-			case <-ctx.Done():
-				slog.Info("agent shutdown requested")
-				return nil
-			case <-time.After(5 * time.Second):
+			if !sleep(ctx, retryDelay) {
+				break
 			}
 			continue
 		}
@@ -132,11 +132,8 @@ func (a *Agent) Run(ctx context.Context) error {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			slog.Error("checkin returned non-OK status", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
-			select {
-			case <-ctx.Done():
-				slog.Info("agent shutdown requested")
-				return nil
-			case <-time.After(5 * time.Second):
+			if !sleep(ctx, retryDelay) {
+				break
 			}
 			continue
 		}
@@ -146,11 +143,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err := json.NewDecoder(resp.Body).Decode(&checkinResp); err != nil {
 			resp.Body.Close()
 			slog.Error("failed to decode checkin response", "error", err)
-			select {
-			case <-ctx.Done():
-				slog.Info("agent shutdown requested")
-				return nil
-			case <-time.After(5 * time.Second):
+			if !sleep(ctx, retryDelay) {
+				break
 			}
 			continue
 		}
@@ -166,12 +160,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		// Execute each module and report results
 		reportFailed := false
 		for _, mod := range modules {
-			// Check context again
-			select {
-			case <-ctx.Done():
-				slog.Info("agent shutdown requested")
-				return nil
-			default:
+			if ctx.Err() != nil {
+				break
 			}
 
 			// Execute module
@@ -205,7 +195,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 
 			// Read response to ensure connection is drained
-			io.ReadAll(reportResp.Body)
+			io.Copy(io.Discard, reportResp.Body)
 			reportResp.Body.Close()
 
 			if reportResp.StatusCode != http.StatusOK && reportResp.StatusCode != http.StatusCreated {
@@ -215,14 +205,10 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 		}
 
-		// If report failed, stop executing remaining modules and log the failure
 		if reportFailed {
 			slog.Error("report failed, stopping module execution")
-			select {
-			case <-ctx.Done():
-				slog.Info("agent shutdown requested")
-				return nil
-			case <-time.After(5 * time.Second):
+			if !sleep(ctx, retryDelay) {
+				break
 			}
 			continue
 		}
@@ -233,14 +219,13 @@ func (a *Agent) Run(ctx context.Context) error {
 			pollInterval = 60 // default to 60 seconds if not set
 		}
 		slog.Debug("sleeping before next poll", "interval_seconds", pollInterval)
-		select {
-		case <-ctx.Done():
-			slog.Info("agent shutdown requested")
-			return nil
-		case <-time.After(time.Duration(pollInterval) * time.Second):
-			// Continue to next iteration
+		if !sleep(ctx, time.Duration(pollInterval)*time.Second) {
+			break
 		}
 	}
+
+	slog.Info("agent shutdown requested")
+	return nil
 }
 
 // generateUUID generates a UUID v4 string in the format 8-4-4-4-12 hex.
@@ -255,9 +240,11 @@ func generateUUID() (string, error) {
 		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16]), nil
 }
 
+var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 // readOrCreateUUID reads or creates a UUID from the agent-id file in dataDir.
-// If the file exists and contains a valid UUID, it is returned (AC6.2).
-// If the file does not exist, a new UUID is generated, the file is created, and the UUID is returned (AC6.1).
+// If the file exists and contains a valid UUID, it is returned.
+// Otherwise a new UUID is generated, written to the file, and returned.
 // Parent directories are created if needed.
 func readOrCreateUUID(dataDir string) (string, error) {
 	// Ensure parent directory exists
@@ -270,8 +257,11 @@ func readOrCreateUUID(dataDir string) (string, error) {
 	// Try to read existing UUID
 	if content, err := os.ReadFile(filePath); err == nil {
 		uuid := strings.TrimSpace(string(content))
-		if uuid != "" {
+		if uuidPattern.MatchString(uuid) {
 			return uuid, nil
+		}
+		if uuid != "" {
+			slog.Warn("invalid UUID in agent-id file, regenerating", "value", uuid)
 		}
 	}
 

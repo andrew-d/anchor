@@ -14,18 +14,18 @@ import (
 
 // UIAgentResponse represents an agent in the list response.
 type UIAgentResponse struct {
-	ID           string      `json:"id"`
-	Hostname     string      `json:"hostname"`
-	DisplayName  *string     `json:"display_name"`
-	RemoteIP     string      `json:"remote_ip"`
-	OS           string      `json:"os"`
-	Arch         string      `json:"arch"`
-	Distro       string      `json:"distro"`
-	LastSeenAt   int64       `json:"last_seen_at"`
-	Health       string      `json:"health"` // "healthy", "stale", or "unhealthy"
-	ModuleCount  int         `json:"module_count"`
-	ErrorCount   int         `json:"error_count"`
-	Tags         []UITagResponse `json:"tags"`
+	ID          string          `json:"id"`
+	Hostname    string          `json:"hostname"`
+	DisplayName *string         `json:"display_name"`
+	RemoteIP    string          `json:"remote_ip"`
+	OS          string          `json:"os"`
+	Arch        string          `json:"arch"`
+	Distro      string          `json:"distro"`
+	LastSeenAt  int64           `json:"last_seen_at"`
+	Health      string          `json:"health"` // "healthy", "stale", or "unhealthy"
+	ModuleCount int             `json:"module_count"`
+	ErrorCount  int             `json:"error_count"`
+	Tags        []UITagResponse `json:"tags"`
 }
 
 // UITagResponse represents a tag in responses.
@@ -36,15 +36,15 @@ type UITagResponse struct {
 
 // ListAgentsResponse is the response for GET /api/agents.
 type ListAgentsResponse struct {
-	PollIntervalSeconds int                `json:"poll_interval_seconds"`
-	Agents              []UIAgentResponse  `json:"agents"`
+	PollIntervalSeconds int               `json:"poll_interval_seconds"`
+	Agents              []UIAgentResponse `json:"agents"`
 }
 
 // AgentDetailResponse is the response for GET /api/agents/{id}.
 type AgentDetailResponse struct {
-	Agent          UIAgentDetailResponse `json:"agent"`
-	Tags           []UITagResponse       `json:"tags"`
-	ModuleResults  []UIModuleResultResponse `json:"module_results"`
+	Agent         UIAgentDetailResponse    `json:"agent"`
+	Tags          []UITagResponse          `json:"tags"`
+	ModuleResults []UIModuleResultResponse `json:"module_results"`
 }
 
 // UIAgentDetailResponse represents an agent in the detail response.

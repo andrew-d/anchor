@@ -44,17 +44,22 @@ func runModule(name string, script string) ModuleResult {
 		return result
 	}
 	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
 
 	if _, err := tmpFile.WriteString(script); err != nil {
-		tmpFile.Close()
 		result.Status = "error"
 		result.Stderr = err.Error()
 		return result
 	}
-	tmpFile.Close()
 
 	// Make executable
-	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
+	if err := tmpFile.Chmod(0755); err != nil {
+		result.Status = "error"
+		result.Stderr = err.Error()
+		return result
+	}
+
+	if err := tmpFile.Close(); err != nil {
 		result.Status = "error"
 		result.Stderr = err.Error()
 		return result
@@ -74,7 +79,10 @@ func runModule(name string, script string) ModuleResult {
 	// Determine status from exit code
 	if err == nil {
 		result.Status = "ok"
-	} else if exitErr, ok := err.(*exec.ExitError); ok {
+		return result
+	}
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
 		exitCode := exitErr.ExitCode()
 		if exitCode == 80 {
 			result.Status = "changed"

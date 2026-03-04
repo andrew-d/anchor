@@ -21,8 +21,8 @@ type CheckinRequest struct {
 
 // CheckinResponse is the JSON response from POST /api/checkin.
 type CheckinResponse struct {
-	PollIntervalSeconds int              `json:"poll_interval_seconds"`
-	Modules             []CheckinModule  `json:"modules"`
+	PollIntervalSeconds int             `json:"poll_interval_seconds"`
+	Modules             []CheckinModule `json:"modules"`
 }
 
 // CheckinModule is a module entry in the checkin response.

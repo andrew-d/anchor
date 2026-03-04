@@ -10,7 +10,7 @@ var ErrNotFound = errors.New("not found")
 
 // Agent represents a single agent that checks in with the server.
 type Agent struct {
-	ID          string  // UUID of the agent
+	ID          string // UUID of the agent
 	Hostname    string
 	DisplayName *string // Optional display name; nil means use hostname
 	RemoteIP    string  // IP address of the checking-in agent
