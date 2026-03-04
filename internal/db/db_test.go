@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -135,8 +136,8 @@ func TestGetAgent_NotFound(t *testing.T) {
 	defer store.Close()
 
 	_, err := store.GetAgent(context.Background(), "nonexistent")
-	if err == nil {
-		t.Error("Expected error for nonexistent agent, got nil")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
 }
 
@@ -618,36 +619,36 @@ func TestGetLatestModuleResults(t *testing.T) {
 		t.Errorf("Expected 2 latest results, got %d", len(latest))
 	}
 
-	// Find mod_a in results
-	var mod_a *ModuleResult
-	var mod_b *ModuleResult
+	// Find modA in results
+	var modA *ModuleResult
+	var modB *ModuleResult
 	for _, r := range latest {
 		if r.ModuleName == "mod_a" {
-			mod_a = &r
+			modA = &r
 		}
 		if r.ModuleName == "mod_b" {
-			mod_b = &r
+			modB = &r
 		}
 	}
 
-	if mod_a == nil {
+	if modA == nil {
 		t.Fatal("mod_a not found in latest results")
 	}
-	if mod_a.ExecutedAt != 2000 {
-		t.Errorf("mod_a ExecutedAt: expected 2000, got %d", mod_a.ExecutedAt)
+	if modA.ExecutedAt != 2000 {
+		t.Errorf("mod_a ExecutedAt: expected 2000, got %d", modA.ExecutedAt)
 	}
-	if mod_a.Status != "changed" {
-		t.Errorf("mod_a Status: expected changed, got %s", mod_a.Status)
+	if modA.Status != "changed" {
+		t.Errorf("mod_a Status: expected changed, got %s", modA.Status)
 	}
-	if mod_a.Stdout != "new" {
-		t.Errorf("mod_a Stdout: expected new, got %s", mod_a.Stdout)
+	if modA.Stdout != "new" {
+		t.Errorf("mod_a Stdout: expected new, got %s", modA.Stdout)
 	}
 
-	if mod_b == nil {
+	if modB == nil {
 		t.Fatal("mod_b not found in latest results")
 	}
-	if mod_b.ExecutedAt != 1500 {
-		t.Errorf("mod_b ExecutedAt: expected 1500, got %d", mod_b.ExecutedAt)
+	if modB.ExecutedAt != 1500 {
+		t.Errorf("mod_b ExecutedAt: expected 1500, got %d", modB.ExecutedAt)
 	}
 }
 

@@ -126,7 +126,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (Agent, error) {
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return Agent{}, fmt.Errorf("agent not found")
+			return Agent{}, ErrNotFound
 		}
 		return Agent{}, err
 	}

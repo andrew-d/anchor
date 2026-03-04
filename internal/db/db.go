@@ -1,6 +1,12 @@
 package db
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrNotFound is returned when a requested entity is not found.
+var ErrNotFound = errors.New("not found")
 
 // Agent represents a single agent that checks in with the server.
 type Agent struct {
