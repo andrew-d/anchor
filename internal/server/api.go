@@ -1,5 +1,9 @@
 package server
 
+import (
+	"net/http"
+)
+
 // CheckinRequest is the JSON body of POST /api/checkin.
 type CheckinRequest struct {
 	ID       string `json:"id"`
@@ -34,4 +38,16 @@ type ReportRequest struct {
 // ReportResponse is the JSON response from POST /api/report.
 type ReportResponse struct {
 	OK bool `json:"ok"`
+}
+
+// handleCheckin handles POST /api/checkin requests.
+// Implemented in Task 3.
+func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement in Task 3
+}
+
+// handleReport handles POST /api/report requests.
+// Implemented in Task 4.
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	// TODO: Implement in Task 4
 }
