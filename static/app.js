@@ -101,21 +101,94 @@ function AgentDetail({ id }) {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [expanded, setExpanded] = useState({});
+    const [allTags, setAllTags] = useState([]);
+    const [effectiveModules, setEffectiveModules] = useState([]);
+    const [allModules, setAllModules] = useState([]);
+    const [selectedTag, setSelectedTag] = useState('');
+    const [selectedModule, setSelectedModule] = useState('');
+    const [isAdding, setIsAdding] = useState(false);
 
     useEffect(() => {
-        fetchJSON(`/api/agents/${id}`)
-            .then(setData)
-            .catch(e => setError(e.message));
+        Promise.all([
+            fetchJSON(`/api/agents/${id}`).then(setData),
+            fetchJSON('/api/tags').then(data => setAllTags(data.tags || [])),
+            fetchJSON(`/api/agents/${id}/modules`).then(data => setEffectiveModules(data.modules || [])),
+            fetchJSON('/api/modules').then(data => setAllModules(data.modules || []))
+        ]).catch(e => setError(e.message));
     }, [id]);
 
     const toggleExpand = (name) => {
         setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
     };
 
+    const handleAddTag = async (e) => {
+        e.preventDefault();
+        if (!selectedTag) return;
+        setIsAdding(true);
+        try {
+            const agentTags = data.tags.map(t => t.id).concat([parseInt(selectedTag)]);
+            await putJSON(`/api/agents/${id}/tags`, { tag_ids: agentTags });
+            setSelectedTag('');
+            const updatedData = await fetchJSON(`/api/agents/${id}`);
+            setData(updatedData);
+            const modules = await fetchJSON(`/api/agents/${id}/modules`);
+            setEffectiveModules(modules.modules || []);
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setIsAdding(false);
+        }
+    };
+
+    const handleRemoveTag = async (tagId) => {
+        if (!confirm('Remove this tag?')) return;
+        try {
+            const agentTags = data.tags.filter(t => t.id !== tagId).map(t => t.id);
+            await putJSON(`/api/agents/${id}/tags`, { tag_ids: agentTags });
+            const updatedData = await fetchJSON(`/api/agents/${id}`);
+            setData(updatedData);
+            const modules = await fetchJSON(`/api/agents/${id}/modules`);
+            setEffectiveModules(modules.modules || []);
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
+    const handleAddModule = async (e) => {
+        e.preventDefault();
+        if (!selectedModule) return;
+        setIsAdding(true);
+        try {
+            await postJSON('/api/assignments', { module_name: selectedModule, agent_id: id });
+            setSelectedModule('');
+            const modules = await fetchJSON(`/api/agents/${id}/modules`);
+            setEffectiveModules(modules.modules || []);
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setIsAdding(false);
+        }
+    };
+
+    const handleRemoveModule = async (assignmentId) => {
+        if (!confirm('Remove this assignment?')) return;
+        try {
+            await deleteJSON(`/api/assignments/${assignmentId}`);
+            const modules = await fetchJSON(`/api/agents/${id}/modules`);
+            setEffectiveModules(modules.modules || []);
+        } catch (e) {
+            setError(e.message);
+        }
+    };
+
     if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
     if (!data) return html`<div class="container"><p>Loading...</p></div>`;
 
     const { agent, tags, module_results } = data;
+
+    // Tags that are already assigned to this agent
+    const assignedTagIds = new Set(tags.map(t => t.id));
+    const availableTags = allTags.filter(t => !assignedTagIds.has(t.id));
 
     return html`
         <div class="container">
@@ -127,10 +200,64 @@ function AgentDetail({ id }) {
                 <dt>OS / Arch</dt><dd>${agent.os} / ${agent.arch}</dd>
                 <dt>Distro</dt><dd>${agent.distro}</dd>
                 <dt>Last Seen</dt><dd>${new Date(agent.last_seen_at * 1000).toLocaleString()}</dd>
-                <dt>Tags</dt><dd>${tags.length > 0 ? tags.map(t => html`<span class="tag">${t.name}</span>`) : 'None'}</dd>
             </dl>
 
-            <h3>Modules</h3>
+            <h3>Tags</h3>
+            ${tags.length === 0 && html`<p>No tags assigned.</p>`}
+            ${tags.length > 0 && html`
+                <div class="tag-assignment-list">
+                    ${tags.map(t => html`
+                        <div class="tag-assignment-item">
+                            <span>${t.name}</span>
+                            <button onClick=${() => handleRemoveTag(t.id)} class="btn-delete">Remove</button>
+                        </div>
+                    `)}
+                </div>
+            `}
+
+            ${availableTags.length > 0 && html`
+                <div class="form-section">
+                    <form onSubmit=${handleAddTag}>
+                        <select value=${selectedTag} onInput=${e => setSelectedTag(e.target.value)} disabled=${isAdding}>
+                            <option value="">Add a tag...</option>
+                            ${availableTags.map(t => html`<option value=${t.id}>${t.name}</option>`)}
+                        </select>
+                        <button type="submit" disabled=${isAdding || !selectedTag}>${isAdding ? 'Adding...' : 'Add Tag'}</button>
+                    </form>
+                </div>
+            `}
+
+            <h3>Effective Module Set</h3>
+            ${effectiveModules.length === 0 && html`<p>No modules assigned.</p>`}
+            ${effectiveModules.length > 0 && html`
+                <div class="effective-modules-list">
+                    ${effectiveModules.map(m => html`
+                        <div class="effective-module-item">
+                            <div>
+                                <span class="module-name">${m.name}</span>
+                                <span class="module-source" style=${m.source === 'direct' ? 'background: #dbeafe; color: #1e40af;' : 'background: #f3e8ff; color: #6b21a8;'}>
+                                    ${m.source === 'direct' ? 'Direct' : m.source}
+                                </span>
+                            </div>
+                            ${m.source === 'direct' && html`
+                                <button onClick=${() => handleRemoveModule(m.assignment_id)} class="btn-delete">Remove</button>
+                            `}
+                        </div>
+                    `)}
+                </div>
+            `}
+
+            <div class="form-section">
+                <form onSubmit=${handleAddModule}>
+                    <select value=${selectedModule} onInput=${e => setSelectedModule(e.target.value)} disabled=${isAdding}>
+                        <option value="">Assign a module...</option>
+                        ${allModules.map(m => html`<option value=${m.filename}>${m.name}</option>`)}
+                    </select>
+                    <button type="submit" disabled=${isAdding || !selectedModule}>${isAdding ? 'Adding...' : 'Assign Module'}</button>
+                </form>
+            </div>
+
+            <h3>Module Results</h3>
             ${module_results.map(mr => html`
                 <div class="module-result">
                     <div class="module-result-header" onClick=${() => toggleExpand(mr.module_name)}>
