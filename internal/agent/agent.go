@@ -127,6 +127,20 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 
+		// Check for non-OK status before decoding JSON
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			slog.Error("checkin returned non-OK status", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
+			select {
+			case <-ctx.Done():
+				slog.Info("agent shutdown requested")
+				return nil
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+
 		// Decode checkin response
 		var checkinResp CheckinResponse
 		if err := json.NewDecoder(resp.Body).Decode(&checkinResp); err != nil {

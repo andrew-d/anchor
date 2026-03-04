@@ -1,0 +1,24 @@
+#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "OS Info", "description": "Reports operating system information"}'
+        ;;
+    apply)
+        echo "kernel: $(uname -s)"
+        echo "kernel_version: $(uname -r)"
+        echo "arch: $(uname -m)"
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            echo "distro: ${PRETTY_NAME:-unknown}"
+        elif command -v sw_vers >/dev/null 2>&1; then
+            echo "distro: $(sw_vers -productName) $(sw_vers -productVersion)"
+        else
+            echo "distro: unknown"
+        fi
+        exit 0
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac

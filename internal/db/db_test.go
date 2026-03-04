@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -993,6 +995,52 @@ func TestGetAgentModuleDetails_NoModules(t *testing.T) {
 
 	if len(details) != 0 {
 		t.Errorf("Expected 0 modules, got %d", len(details))
+	}
+}
+
+// TestConcurrentUpsertAgents verifies that concurrent writes do not produce
+// SQLITE_BUSY errors, which validates that SetMaxOpenConns(1) serializes access.
+func TestConcurrentUpsertAgents(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	const goroutines = 10
+
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			agent := Agent{
+				ID:         fmt.Sprintf("agent-%d", i),
+				Hostname:   fmt.Sprintf("host-%d", i),
+				RemoteIP:   "10.0.0.1",
+				OS:         "linux",
+				Arch:       "amd64",
+				Distro:     "ubuntu",
+				LastSeenAt: 1000,
+			}
+			if err := store.UpsertAgent(ctx, agent); err != nil {
+				errs <- fmt.Errorf("goroutine %d: %w", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("concurrent UpsertAgent failed: %v", err)
+	}
+
+	agents, err := store.ListAgents(ctx)
+	if err != nil {
+		t.Fatalf("ListAgents failed: %v", err)
+	}
+	if len(agents) != goroutines {
+		t.Fatalf("expected %d agents, got %d", goroutines, len(agents))
 	}
 }
 

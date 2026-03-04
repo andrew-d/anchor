@@ -23,6 +23,11 @@ func Open(filepath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// SQLite only supports one concurrent writer. Limiting to a single
+	// connection ensures PRAGMAs (foreign_keys, busy_timeout) are set on
+	// every query and avoids SQLITE_BUSY under concurrent HTTP handlers.
+	db.SetMaxOpenConns(1)
+
 	// Enable foreign keys
 	if _, err := db.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil {
 		db.Close()

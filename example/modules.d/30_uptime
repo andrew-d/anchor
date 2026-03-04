@@ -1,0 +1,20 @@
+#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "Uptime", "description": "Reports system uptime and load average"}'
+        ;;
+    apply)
+        echo "uptime: $(uptime 2>/dev/null || echo unknown)"
+        if [ -f /proc/loadavg ]; then
+            read one five fifteen rest < /proc/loadavg
+            echo "load_1m: $one"
+            echo "load_5m: $five"
+            echo "load_15m: $fifteen"
+        fi
+        exit 0
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac

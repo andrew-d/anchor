@@ -113,6 +113,72 @@ func TestReadOrCreateUUID_CreatesParentDir(t *testing.T) {
 	}
 }
 
+// TestAgentPollingLoop_CheckinServerError verifies that the agent retries gracefully
+// when the server returns a non-200 status on checkin, without attempting to JSON-decode
+// the error body.
+func TestAgentPollingLoop_CheckinServerError(t *testing.T) {
+	dataDir := t.TempDir()
+
+	var checkinCount int
+	var mu sync.Mutex
+	retryChan := make(chan struct{}, 3)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/checkin" && r.Method == "POST" {
+			mu.Lock()
+			checkinCount++
+			count := checkinCount
+			mu.Unlock()
+
+			retryChan <- struct{}{}
+
+			if count <= 2 {
+				// First two checkins fail with plain text error (not JSON)
+				http.Error(w, "database is locked", http.StatusInternalServerError)
+				return
+			}
+			// Third checkin succeeds with no modules
+			resp := CheckinResponse{
+				PollIntervalSeconds: 300,
+				Modules:             []CheckinModule{},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	agent := New(server.URL, dataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error)
+	go func() {
+		done <- agent.Run(ctx)
+	}()
+
+	// Wait for the third checkin (2 failures + 1 success)
+	for i := 0; i < 3; i++ {
+		select {
+		case <-retryChan:
+		case <-time.After(15 * time.Second):
+			t.Fatalf("timeout waiting for checkin attempt %d", i+1)
+		}
+	}
+	cancel()
+	<-done
+
+	mu.Lock()
+	finalCount := checkinCount
+	mu.Unlock()
+
+	if finalCount < 3 {
+		t.Fatalf("expected at least 3 checkin attempts, got %d", finalCount)
+	}
+}
+
 // TestAgentPollingLoop_ReportsModulesIndividually verifies that the agent checks in,
 // receives modules, executes them in sorted order, and reports each result individually (AC2.4).
 func TestAgentPollingLoop_ReportsModulesIndividually(t *testing.T) {

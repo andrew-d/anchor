@@ -1,0 +1,28 @@
+#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "Memory", "description": "Reports memory usage"}'
+        ;;
+    apply)
+        if [ -f /proc/meminfo ]; then
+            total=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+            avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+            if [ -n "$total" ] && [ -n "$avail" ]; then
+                used=$((total - avail))
+                pct=$((used * 100 / total))
+                echo "total_kb: $total"
+                echo "available_kb: $avail"
+                echo "used_pct: ${pct}%"
+            fi
+        elif command -v sysctl >/dev/null 2>&1; then
+            echo "total_bytes: $(sysctl -n hw.memsize 2>/dev/null || echo unknown)"
+        else
+            echo "memory info: not available"
+        fi
+        exit 0
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac

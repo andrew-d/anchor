@@ -1,0 +1,21 @@
+#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "Disk Usage", "description": "Reports disk usage for root filesystem"}'
+        ;;
+    apply)
+        root_usage=$(df -h / 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%')
+        echo "root_filesystem_usage: ${root_usage}%"
+        echo "details:"
+        df -h / 2>/dev/null | awk 'NR==2 {printf "  size=%s used=%s avail=%s\n", $2, $3, $4}'
+        if [ "${root_usage:-0}" -gt 90 ]; then
+            echo "warning: root filesystem usage above 90%" >&2
+            exit 1
+        fi
+        exit 0
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac

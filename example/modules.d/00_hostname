@@ -1,0 +1,15 @@
+#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "Hostname Check", "description": "Reports the current hostname"}'
+        ;;
+    apply)
+        echo "hostname: $(hostname)"
+        echo "fqdn: $(hostname -f 2>/dev/null || echo unknown)"
+        exit 0
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac
