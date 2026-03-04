@@ -52,6 +52,13 @@ async function deleteJSON(url) {
     return res.json();
 }
 
+// --- Helpers ---
+
+function formatTime(unixSeconds) {
+    const d = new Date(unixSeconds * 1000);
+    return { local: d.toLocaleString(), utc: d.toUTCString() };
+}
+
 // --- Components (Dashboard, AgentDetail) ---
 
 function Dashboard() {
@@ -59,9 +66,10 @@ function Dashboard() {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        fetchJSON('/api/agents')
-            .then(setData)
-            .catch(e => setError(e.message));
+        const load = () => fetchJSON('/api/agents').then(setData).catch(e => setError(e.message));
+        load();
+        const id = setInterval(load, 10000);
+        return () => clearInterval(id);
     }, []);
 
     if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
@@ -111,13 +119,19 @@ function AgentDetail({ id }) {
     const [editingName, setEditingName] = useState(false);
     const [nameInput, setNameInput] = useState('');
 
-    useEffect(() => {
+    const loadData = () => {
         Promise.all([
             fetchJSON(`/api/agents/${id}`).then(setData),
             fetchJSON('/api/tags').then(data => setAllTags(data.tags || [])),
             fetchJSON(`/api/agents/${id}/modules`).then(data => setEffectiveModules(data.modules || [])),
             fetchJSON('/api/modules').then(data => setAllModules(data.modules || []))
         ]).catch(e => setError(e.message));
+    };
+
+    useEffect(() => {
+        loadData();
+        const intervalId = setInterval(loadData, 10000);
+        return () => clearInterval(intervalId);
     }, [id]);
 
     const toggleExpand = (name) => {
@@ -223,7 +237,7 @@ function AgentDetail({ id }) {
                 <dt>Remote IP</dt><dd>${agent.remote_ip}</dd>
                 <dt>OS / Arch</dt><dd>${agent.os} / ${agent.arch}</dd>
                 <dt>Distro</dt><dd>${agent.distro}</dd>
-                <dt>Last Seen</dt><dd>${new Date(agent.last_seen_at * 1000).toLocaleString()}</dd>
+                <dt>Last Seen</dt><dd title=${formatTime(agent.last_seen_at).utc}>${formatTime(agent.last_seen_at).local}</dd>
             </dl>
 
             <h3>Tags</h3>
