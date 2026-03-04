@@ -261,7 +261,8 @@ func TestCheckinWithModules(t *testing.T) {
 	}
 
 	// Assign module to agent
-	if err := store.AssignModule(context.Background(), "test_module", stringPtr("agent-uuid-mod1"), nil); err != nil {
+	_, err := store.AssignModule(context.Background(), "test_module", stringPtr("agent-uuid-mod1"), nil)
+	if err != nil {
 		t.Fatalf("Failed to assign module: %v", err)
 	}
 
@@ -445,10 +446,12 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 	}
 
 	// Assign modA directly, modB to tag
-	if err := store.AssignModule(context.Background(), "modA", stringPtr("agent-uuid-tag"), nil); err != nil {
+	_, err = store.AssignModule(context.Background(), "modA", stringPtr("agent-uuid-tag"), nil)
+	if err != nil {
 		t.Fatalf("Failed to assign modA: %v", err)
 	}
-	if err := store.AssignModule(context.Background(), "modB", nil, &tag.ID); err != nil {
+	_, err = store.AssignModule(context.Background(), "modB", nil, &tag.ID)
+	if err != nil {
 		t.Fatalf("Failed to assign modB: %v", err)
 	}
 
@@ -530,10 +533,12 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 	}
 
 	// Assign same module to both tags
-	if err := store.AssignModule(context.Background(), "sharedMod", nil, &tag1.ID); err != nil {
+	_, err = store.AssignModule(context.Background(), "sharedMod", nil, &tag1.ID)
+	if err != nil {
 		t.Fatalf("Failed to assign sharedMod to tag1: %v", err)
 	}
-	if err := store.AssignModule(context.Background(), "sharedMod", nil, &tag2.ID); err != nil {
+	_, err = store.AssignModule(context.Background(), "sharedMod", nil, &tag2.ID)
+	if err != nil {
 		t.Fatalf("Failed to assign sharedMod to tag2: %v", err)
 	}
 

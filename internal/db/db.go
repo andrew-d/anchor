@@ -68,7 +68,7 @@ type Store interface {
 	GetAgentTags(ctx context.Context, agentID string) ([]Tag, error)
 
 	// Module assignments
-	AssignModule(ctx context.Context, moduleName string, agentID *string, tagID *int64) error
+	AssignModule(ctx context.Context, moduleName string, agentID *string, tagID *int64) (int64, error)
 	UnassignModule(ctx context.Context, id int64) error
 	GetAgentModules(ctx context.Context, agentID string) ([]string, error)
 	ListAssignments(ctx context.Context) ([]ModuleAssignment, error)

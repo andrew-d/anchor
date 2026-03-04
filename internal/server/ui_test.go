@@ -32,7 +32,7 @@ func TestListAgentsHealthyStatus(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(context.Background(), agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
@@ -45,7 +45,7 @@ func TestListAgentsHealthyStatus(t *testing.T) {
 		Stderr:     "",
 		ExecutedAt: now,
 	})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to insert module result: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestListAgentsHealthyStatus(t *testing.T) {
 		Stderr:     "",
 		ExecutedAt: now,
 	})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to insert module result: %v", err)
 	}
 
@@ -66,14 +66,14 @@ func TestListAgentsHealthyStatus(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAgentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestListAgentsUnhealthyStatus(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(context.Background(), agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestListAgentsUnhealthyStatus(t *testing.T) {
 		Stderr:     "error message",
 		ExecutedAt: now,
 	})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to insert module result: %v", err)
 	}
 
@@ -132,14 +132,14 @@ func TestListAgentsUnhealthyStatus(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAgentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestListAgentsStaleStatus(t *testing.T) {
 		LastSeenAt: oldTime,
 	}
 	err := store.UpsertAgent(context.Background(), agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
@@ -183,14 +183,14 @@ func TestListAgentsStaleStatus(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAgentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -221,7 +221,7 @@ func TestListAgentsHealthyNoModules(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(context.Background(), agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
@@ -230,14 +230,14 @@ func TestListAgentsHealthyNoModules(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAgentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -271,18 +271,18 @@ func TestGetAgentDetail(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(context.Background(), agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
 	// Create tag and assign to agent
 	tag, err := store.CreateTag(context.Background(), "webservers")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 
 	err = store.SetAgentTags(context.Background(), "agent-5", []int64{tag.ID})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to set agent tags: %v", err)
 	}
 
@@ -295,7 +295,7 @@ func TestGetAgentDetail(t *testing.T) {
 		Stderr:     "",
 		ExecutedAt: now,
 	})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to insert module result: %v", err)
 	}
 
@@ -307,14 +307,14 @@ func TestGetAgentDetail(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/agents/agent-5")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result AgentDetailResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -359,7 +359,7 @@ func TestGetAgentNotFound(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/agents/nonexistent")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -385,7 +385,7 @@ func TestListAgentsResponse(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(context.Background(), agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
@@ -393,14 +393,14 @@ func TestListAgentsResponse(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAgentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -426,7 +426,7 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(context.Background(), agent1)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert healthy agent: %v", err)
 	}
 
@@ -441,7 +441,7 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err = store.UpsertAgent(context.Background(), agent2)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert unhealthy agent: %v", err)
 	}
 	err = store.InsertModuleResult(context.Background(), db.ModuleResult{
@@ -452,7 +452,7 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		Stderr:     "error",
 		ExecutedAt: now,
 	})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to insert module result: %v", err)
 	}
 
@@ -468,7 +468,7 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		LastSeenAt: oldTime,
 	}
 	err = store.UpsertAgent(context.Background(), agent3)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert stale agent: %v", err)
 	}
 
@@ -476,14 +476,14 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAgentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -522,19 +522,12 @@ func TestCreateTag(t *testing.T) {
 	// Create a tag
 	createReq := CreateTagRequest{Name: "webservers"}
 	createReqBody, err := json.Marshal(createReq)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
 	}
 
-	resp, err := http.Post(ts.URL+"/api/tags", "application/json", nil)
-	if err != nil {
-		t.Fatalf("Failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// Create with proper body
-	resp, err = http.Post(ts.URL+"/api/tags", "application/json", bytes.NewReader(createReqBody))
-	if err != nil {
+	resp, err := http.Post(ts.URL+"/api/tags", "application/json", bytes.NewReader(createReqBody))
+		if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 	defer resp.Body.Close()
@@ -545,7 +538,7 @@ func TestCreateTag(t *testing.T) {
 
 	var tagResp UITagResponse
 	err = json.NewDecoder(resp.Body).Decode(&tagResp)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -558,14 +551,14 @@ func TestCreateTag(t *testing.T) {
 
 	// List tags and verify it appears
 	resp, err = http.Get(ts.URL + "/api/tags")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to list tags: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var listResp ListTagsResponse
 	err = json.NewDecoder(resp.Body).Decode(&listResp)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode list response: %v", err)
 	}
 
@@ -582,7 +575,7 @@ func TestDeleteTag(t *testing.T) {
 
 	ctx := context.Background()
 	tag, err := store.CreateTag(ctx, "test-tag")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 
@@ -593,12 +586,12 @@ func TestDeleteTag(t *testing.T) {
 	defer ts.Close()
 
 	req, err := http.NewRequest("DELETE", ts.URL+"/api/tags/"+strconv.FormatInt(tag.ID, 10), nil)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -609,7 +602,7 @@ func TestDeleteTag(t *testing.T) {
 
 	var result OKResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -636,13 +629,13 @@ func TestSetAgentTags(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(ctx, agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
 	// Create tag
 	tag, err := store.CreateTag(ctx, "webservers")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 
@@ -655,18 +648,18 @@ func TestSetAgentTags(t *testing.T) {
 	// Set agent tags
 	setReq := SetAgentTagsRequest{TagIDs: []int64{tag.ID}}
 	setReqBody, err := json.Marshal(setReq)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
 	}
 
 	req, err := http.NewRequest("PUT", ts.URL+"/api/agents/agent-tags-1/tags", bytes.NewReader(setReqBody))
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -677,7 +670,7 @@ func TestSetAgentTags(t *testing.T) {
 
 	// Verify tags were assigned
 	tags, err := store.GetAgentTags(ctx, "agent-tags-1")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to get agent tags: %v", err)
 	}
 
@@ -706,12 +699,12 @@ func TestListAssignments(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(ctx, agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
 	agentID := "agent-assign-1"
-	err = store.AssignModule(ctx, "00_base", &agentID, nil)
+	_, err = store.AssignModule(ctx, "00_base", &agentID, nil)
 	if err != nil {
 		t.Fatalf("Failed to assign module: %v", err)
 	}
@@ -723,14 +716,14 @@ func TestListAssignments(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/assignments")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListAssignmentsResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -768,7 +761,7 @@ func TestCreateAssignmentWithAgentID(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(ctx, agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
@@ -787,12 +780,12 @@ func TestCreateAssignmentWithAgentID(t *testing.T) {
 		TagID:      nil,
 	}
 	createReqBody, err := json.Marshal(createReq)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
 	}
 
 	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(createReqBody))
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create assignment: %v", err)
 	}
 	defer resp.Body.Close()
@@ -803,7 +796,7 @@ func TestCreateAssignmentWithAgentID(t *testing.T) {
 
 	var assignResp ModuleAssignmentResponse
 	err = json.NewDecoder(resp.Body).Decode(&assignResp)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -813,14 +806,14 @@ func TestCreateAssignmentWithAgentID(t *testing.T) {
 
 	// Verify in effective modules
 	resp, err = http.Get(ts.URL + "/api/agents/agent-direct-1/modules")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to get effective modules: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var effectiveResp AgentEffectiveModulesResponse
 	err = json.NewDecoder(resp.Body).Decode(&effectiveResp)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode effective modules: %v", err)
 	}
 
@@ -846,7 +839,7 @@ func TestCreateAssignmentWithTagID(t *testing.T) {
 
 	// Create tag
 	tag, err := store.CreateTag(ctx, "webservers")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 
@@ -861,12 +854,12 @@ func TestCreateAssignmentWithTagID(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err = store.UpsertAgent(ctx, agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
 	err = store.SetAgentTags(ctx, "agent-tag-assign-1", []int64{tag.ID})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to set agent tags: %v", err)
 	}
 
@@ -884,12 +877,12 @@ func TestCreateAssignmentWithTagID(t *testing.T) {
 		TagID:      &tag.ID,
 	}
 	createReqBody, err := json.Marshal(createReq)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
 	}
 
 	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(createReqBody))
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create assignment: %v", err)
 	}
 	defer resp.Body.Close()
@@ -900,14 +893,14 @@ func TestCreateAssignmentWithTagID(t *testing.T) {
 
 	// Verify in effective modules with tag source
 	resp, err = http.Get(ts.URL + "/api/agents/agent-tag-assign-1/modules")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to get effective modules: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var effectiveResp AgentEffectiveModulesResponse
 	err = json.NewDecoder(resp.Body).Decode(&effectiveResp)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode effective modules: %v", err)
 	}
 
@@ -942,12 +935,12 @@ func TestCreateAssignmentBothAgentAndTag(t *testing.T) {
 		TagID:      &tagID,
 	}
 	createReqBody, err := json.Marshal(createReq)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
 	}
 
 	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(createReqBody))
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -975,18 +968,18 @@ func TestDeleteAssignment(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err := store.UpsertAgent(ctx, agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
 	agentID := "agent-delete-1"
-	err = store.AssignModule(ctx, "00_base", &agentID, nil)
+	_, err = store.AssignModule(ctx, "00_base", &agentID, nil)
 	if err != nil {
 		t.Fatalf("Failed to assign module: %v", err)
 	}
 
 	assignments, err := store.ListAssignments(ctx)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to list assignments: %v", err)
 	}
 
@@ -1003,12 +996,12 @@ func TestDeleteAssignment(t *testing.T) {
 	defer ts.Close()
 
 	req, err := http.NewRequest("DELETE", ts.URL+"/api/assignments/"+strconv.FormatInt(assignmentID, 10), nil)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create request: %v", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
@@ -1031,7 +1024,7 @@ esac
 `
 	modulePath := filepath.Join(s.modulesDir, "00_base")
 	err := os.WriteFile(modulePath, []byte(moduleScript), 0755)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to write module: %v", err)
 	}
 
@@ -1042,14 +1035,14 @@ esac
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/modules")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to make request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result ListModulesResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -1078,7 +1071,7 @@ func TestEffectiveModulesWithMixed(t *testing.T) {
 
 	// Create tag
 	tag, err := store.CreateTag(ctx, "webservers")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 
@@ -1093,24 +1086,24 @@ func TestEffectiveModulesWithMixed(t *testing.T) {
 		LastSeenAt: now,
 	}
 	err = store.UpsertAgent(ctx, agent)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to upsert agent: %v", err)
 	}
 
 	err = store.SetAgentTags(ctx, "agent-mixed-1", []int64{tag.ID})
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to set agent tags: %v", err)
 	}
 
 	// Assign mod_a directly
 	agentID := "agent-mixed-1"
-	err = store.AssignModule(ctx, "mod_a", &agentID, nil)
+	_, err = store.AssignModule(ctx, "mod_a", &agentID, nil)
 	if err != nil {
 		t.Fatalf("Failed to assign module directly: %v", err)
 	}
 
 	// Assign mod_b to tag
-	err = store.AssignModule(ctx, "mod_b", nil, &tag.ID)
+	_, err = store.AssignModule(ctx, "mod_b", nil, &tag.ID)
 	if err != nil {
 		t.Fatalf("Failed to assign module to tag: %v", err)
 	}
@@ -1122,14 +1115,14 @@ func TestEffectiveModulesWithMixed(t *testing.T) {
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/api/agents/agent-mixed-1/modules")
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to get effective modules: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result AgentEffectiveModulesResponse
 	err = json.NewDecoder(resp.Body).Decode(&result)
-	if err != nil {
+		if err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 

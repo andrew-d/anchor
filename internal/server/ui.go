@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/andrew-d/anchor/internal/db"
@@ -324,6 +325,12 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate tag name is not empty
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "tag name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
 	tag, err := s.store.CreateTag(ctx, req.Name)
 	if err != nil {
 		slog.Error("failed to create tag", "error", err)
@@ -471,48 +478,24 @@ func (s *Server) handleCreateAssignment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err := s.store.AssignModule(ctx, req.ModuleName, req.AgentID, req.TagID)
+	// Validate module_name is not empty
+	if strings.TrimSpace(req.ModuleName) == "" {
+		http.Error(w, "module_name cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	assignmentID, err := s.store.AssignModule(ctx, req.ModuleName, req.AgentID, req.TagID)
 	if err != nil {
 		slog.Error("failed to assign module", "module_name", req.ModuleName, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// Get the created assignment to return it
-	assignments, err := s.store.ListAssignments(ctx)
-	if err != nil {
-		slog.Error("failed to list assignments after create", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Find the most recently created assignment matching our criteria
-	var createdAssignment *ModuleAssignmentResponse
-	for i := len(assignments) - 1; i >= 0; i-- {
-		a := assignments[i]
-		if a.ModuleName == req.ModuleName {
-			matches := false
-			if req.AgentID != nil && a.AgentID != nil && *a.AgentID == *req.AgentID {
-				matches = true
-			} else if req.TagID != nil && a.TagID != nil && *a.TagID == *req.TagID {
-				matches = true
-			}
-			if matches {
-				createdAssignment = &ModuleAssignmentResponse{
-					ID:         a.ID,
-					ModuleName: a.ModuleName,
-					AgentID:    a.AgentID,
-					TagID:      a.TagID,
-				}
-				break
-			}
-		}
-	}
-
-	if createdAssignment == nil {
-		slog.Error("could not find created assignment", "module_name", req.ModuleName)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+	createdAssignment := ModuleAssignmentResponse{
+		ID:         assignmentID,
+		ModuleName: req.ModuleName,
+		AgentID:    req.AgentID,
+		TagID:      req.TagID,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

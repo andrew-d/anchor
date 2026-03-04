@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -243,10 +245,17 @@ ORDER BY t.name
 }
 
 // AssignModule assigns a module to either an agent or a tag.
-func (s *SQLiteStore) AssignModule(ctx context.Context, moduleName string, agentID *string, tagID *int64) error {
+func (s *SQLiteStore) AssignModule(ctx context.Context, moduleName string, agentID *string, tagID *int64) (int64, error) {
 	query := `INSERT INTO module_assignments (module_name, agent_id, tag_id) VALUES (?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, moduleName, agentID, tagID)
-	return err
+	result, err := s.db.ExecContext(ctx, query, moduleName, agentID, tagID)
+	if err != nil {
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // UnassignModule removes a module assignment.
@@ -458,11 +467,7 @@ ORDER BY ma.module_name
 
 // sortAgentModuleDetails sorts a slice of AgentModuleDetail by ModuleName.
 func sortAgentModuleDetails(details []AgentModuleDetail) {
-	for i := 0; i < len(details); i++ {
-		for j := i + 1; j < len(details); j++ {
-			if details[j].ModuleName < details[i].ModuleName {
-				details[i], details[j] = details[j], details[i]
-			}
-		}
-	}
+	slices.SortFunc(details, func(a, b AgentModuleDetail) int {
+		return strings.Compare(a.ModuleName, b.ModuleName)
+	})
 }
