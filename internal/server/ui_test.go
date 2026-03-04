@@ -1,10 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -501,5 +505,650 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 	}
 	if healthStates["web-stale"] != "stale" {
 		t.Errorf("Expected web-stale to be stale, got %s", healthStates["web-stale"])
+	}
+}
+
+// TestCreateTag tests AC3.1: POST /api/tags creates a tag and GET /api/tags lists it.
+func TestCreateTag(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/tags", s.handleCreateTag)
+	mux.HandleFunc("GET /api/tags", s.handleListTags)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Create a tag
+	createReq := CreateTagRequest{Name: "webservers"}
+	createReqBody, err := json.Marshal(createReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/tags", "application/json", nil)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Create with proper body
+	resp, err = http.Post(ts.URL+"/api/tags", "application/json", bytes.NewReader(createReqBody))
+	if err != nil {
+		t.Fatalf("Failed to create tag: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)
+	}
+
+	var tagResp UITagResponse
+	err = json.NewDecoder(resp.Body).Decode(&tagResp)
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if tagResp.Name != "webservers" {
+		t.Errorf("Expected tag name 'webservers', got '%s'", tagResp.Name)
+	}
+	if tagResp.ID == 0 {
+		t.Errorf("Expected tag ID > 0, got %d", tagResp.ID)
+	}
+
+	// List tags and verify it appears
+	resp, err = http.Get(ts.URL + "/api/tags")
+	if err != nil {
+		t.Fatalf("Failed to list tags: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var listResp ListTagsResponse
+	err = json.NewDecoder(resp.Body).Decode(&listResp)
+	if err != nil {
+		t.Fatalf("Failed to decode list response: %v", err)
+	}
+
+	if len(listResp.Tags) != 1 {
+		t.Errorf("Expected 1 tag, got %d", len(listResp.Tags))
+	} else if listResp.Tags[0].Name != "webservers" {
+		t.Errorf("Expected tag name 'webservers', got '%s'", listResp.Tags[0].Name)
+	}
+}
+
+// TestDeleteTag tests DELETE /api/tags/{id} removes a tag.
+func TestDeleteTag(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	tag, err := store.CreateTag(ctx, "test-tag")
+	if err != nil {
+		t.Fatalf("Failed to create tag: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/tags/{id}", s.handleDeleteTag)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	req, err := http.NewRequest("DELETE", ts.URL+"/api/tags/"+strconv.FormatInt(tag.ID, 10), nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	var result OKResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !result.OK {
+		t.Errorf("Expected ok true, got %v", result.OK)
+	}
+}
+
+// TestSetAgentTags tests PUT /api/agents/{id}/tags assigns tags to an agent.
+func TestSetAgentTags(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Create agent
+	agent := db.Agent{
+		ID:         "agent-tags-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	err := store.UpsertAgent(ctx, agent)
+	if err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	// Create tag
+	tag, err := store.CreateTag(ctx, "webservers")
+	if err != nil {
+		t.Fatalf("Failed to create tag: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/agents/{id}/tags", s.handleSetAgentTags)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Set agent tags
+	setReq := SetAgentTagsRequest{TagIDs: []int64{tag.ID}}
+	setReqBody, err := json.Marshal(setReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequest("PUT", ts.URL+"/api/agents/agent-tags-1/tags", bytes.NewReader(setReqBody))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	// Verify tags were assigned
+	tags, err := store.GetAgentTags(ctx, "agent-tags-1")
+	if err != nil {
+		t.Fatalf("Failed to get agent tags: %v", err)
+	}
+
+	if len(tags) != 1 {
+		t.Errorf("Expected 1 tag, got %d", len(tags))
+	} else if tags[0].Name != "webservers" {
+		t.Errorf("Expected tag name 'webservers', got '%s'", tags[0].Name)
+	}
+}
+
+// TestListAssignments tests GET /api/assignments lists all module assignments.
+func TestListAssignments(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Create agent and assign module
+	agent := db.Agent{
+		ID:         "agent-assign-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	err := store.UpsertAgent(ctx, agent)
+	if err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	agentID := "agent-assign-1"
+	err = store.AssignModule(ctx, "00_base", &agentID, nil)
+	if err != nil {
+		t.Fatalf("Failed to assign module: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/assignments", s.handleListAssignments)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/assignments")
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result ListAssignmentsResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(result.Assignments) != 1 {
+		t.Errorf("Expected 1 assignment, got %d", len(result.Assignments))
+	} else {
+		assign := result.Assignments[0]
+		if assign.ModuleName != "00_base" {
+			t.Errorf("Expected module name '00_base', got '%s'", assign.ModuleName)
+		}
+		if assign.AgentID == nil || *assign.AgentID != agentID {
+			t.Errorf("Expected agent ID '%s', got %v", agentID, assign.AgentID)
+		}
+		if assign.TagID != nil {
+			t.Errorf("Expected tag_id nil, got %v", assign.TagID)
+		}
+	}
+}
+
+// TestCreateAssignmentWithAgentID tests POST /api/assignments creates direct agent assignment (AC3.2).
+func TestCreateAssignmentWithAgentID(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Create agent
+	agent := db.Agent{
+		ID:         "agent-direct-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	err := store.UpsertAgent(ctx, agent)
+	if err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/assignments", s.handleCreateAssignment)
+	mux.HandleFunc("GET /api/agents/{id}/modules", s.handleGetAgentModules)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Create assignment
+	agentID := "agent-direct-1"
+	createReq := CreateAssignmentRequest{
+		ModuleName: "00_base",
+		AgentID:    &agentID,
+		TagID:      nil,
+	}
+	createReqBody, err := json.Marshal(createReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(createReqBody))
+	if err != nil {
+		t.Fatalf("Failed to create assignment: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)
+	}
+
+	var assignResp ModuleAssignmentResponse
+	err = json.NewDecoder(resp.Body).Decode(&assignResp)
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if assignResp.ModuleName != "00_base" {
+		t.Errorf("Expected module name '00_base', got '%s'", assignResp.ModuleName)
+	}
+
+	// Verify in effective modules
+	resp, err = http.Get(ts.URL + "/api/agents/agent-direct-1/modules")
+	if err != nil {
+		t.Fatalf("Failed to get effective modules: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var effectiveResp AgentEffectiveModulesResponse
+	err = json.NewDecoder(resp.Body).Decode(&effectiveResp)
+	if err != nil {
+		t.Fatalf("Failed to decode effective modules: %v", err)
+	}
+
+	if len(effectiveResp.Modules) != 1 {
+		t.Errorf("Expected 1 module, got %d", len(effectiveResp.Modules))
+	} else {
+		mod := effectiveResp.Modules[0]
+		if mod.Name != "00_base" {
+			t.Errorf("Expected module name '00_base', got '%s'", mod.Name)
+		}
+		if mod.Source != "direct" {
+			t.Errorf("Expected source 'direct', got '%s'", mod.Source)
+		}
+	}
+}
+
+// TestCreateAssignmentWithTagID tests POST /api/assignments creates tag assignment (AC3.3).
+func TestCreateAssignmentWithTagID(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Create tag
+	tag, err := store.CreateTag(ctx, "webservers")
+	if err != nil {
+		t.Fatalf("Failed to create tag: %v", err)
+	}
+
+	// Create agent and assign tag
+	agent := db.Agent{
+		ID:         "agent-tag-assign-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	err = store.UpsertAgent(ctx, agent)
+	if err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	err = store.SetAgentTags(ctx, "agent-tag-assign-1", []int64{tag.ID})
+	if err != nil {
+		t.Fatalf("Failed to set agent tags: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/assignments", s.handleCreateAssignment)
+	mux.HandleFunc("GET /api/agents/{id}/modules", s.handleGetAgentModules)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Create assignment to tag
+	createReq := CreateAssignmentRequest{
+		ModuleName: "10_users",
+		AgentID:    nil,
+		TagID:      &tag.ID,
+	}
+	createReqBody, err := json.Marshal(createReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(createReqBody))
+	if err != nil {
+		t.Fatalf("Failed to create assignment: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("Expected status %d, got %d", http.StatusCreated, resp.StatusCode)
+	}
+
+	// Verify in effective modules with tag source
+	resp, err = http.Get(ts.URL + "/api/agents/agent-tag-assign-1/modules")
+	if err != nil {
+		t.Fatalf("Failed to get effective modules: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var effectiveResp AgentEffectiveModulesResponse
+	err = json.NewDecoder(resp.Body).Decode(&effectiveResp)
+	if err != nil {
+		t.Fatalf("Failed to decode effective modules: %v", err)
+	}
+
+	if len(effectiveResp.Modules) != 1 {
+		t.Errorf("Expected 1 module, got %d", len(effectiveResp.Modules))
+	} else {
+		mod := effectiveResp.Modules[0]
+		if mod.Name != "10_users" {
+			t.Errorf("Expected module name '10_users', got '%s'", mod.Name)
+		}
+		if mod.Source != "tag:webservers" {
+			t.Errorf("Expected source 'tag:webservers', got '%s'", mod.Source)
+		}
+	}
+}
+
+// TestCreateAssignmentBothAgentAndTag tests POST /api/assignments with both agent_id and tag_id returns 400.
+func TestCreateAssignmentBothAgentAndTag(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/assignments", s.handleCreateAssignment)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	agentID := "agent-1"
+	tagID := int64(1)
+	createReq := CreateAssignmentRequest{
+		ModuleName: "00_base",
+		AgentID:    &agentID,
+		TagID:      &tagID,
+	}
+	createReqBody, err := json.Marshal(createReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(createReqBody))
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
+	}
+}
+
+// TestDeleteAssignment tests DELETE /api/assignments/{id} removes an assignment.
+func TestDeleteAssignment(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Create agent and assign module
+	agent := db.Agent{
+		ID:         "agent-delete-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	err := store.UpsertAgent(ctx, agent)
+	if err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	agentID := "agent-delete-1"
+	err = store.AssignModule(ctx, "00_base", &agentID, nil)
+	if err != nil {
+		t.Fatalf("Failed to assign module: %v", err)
+	}
+
+	assignments, err := store.ListAssignments(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list assignments: %v", err)
+	}
+
+	if len(assignments) == 0 {
+		t.Fatalf("No assignments created")
+	}
+
+	assignmentID := assignments[0].ID
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/assignments/{id}", s.handleDeleteAssignment)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	req, err := http.NewRequest("DELETE", ts.URL+"/api/assignments/"+strconv.FormatInt(assignmentID, 10), nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+}
+
+// TestListModules tests GET /api/modules returns loaded modules with metadata (AC9.5).
+func TestListModules(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	// Create a test module
+	moduleScript := `#!/bin/sh
+case "$1" in
+    metadata) echo '{"name": "Base Config", "description": "Installs base packages"}' ;;
+    apply) echo "applied"; exit 0 ;;
+esac
+`
+	modulePath := filepath.Join(s.modulesDir, "00_base")
+	err := os.WriteFile(modulePath, []byte(moduleScript), 0755)
+	if err != nil {
+		t.Fatalf("Failed to write module: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/modules", s.handleListModules)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/modules")
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result ListModulesResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(result.Modules) != 1 {
+		t.Errorf("Expected 1 module, got %d", len(result.Modules))
+	} else {
+		mod := result.Modules[0]
+		if mod.Name != "Base Config" {
+			t.Errorf("Expected name 'Base Config', got '%s'", mod.Name)
+		}
+		if mod.Description != "Installs base packages" {
+			t.Errorf("Expected description 'Installs base packages', got '%s'", mod.Description)
+		}
+		if mod.Filename != "00_base" {
+			t.Errorf("Expected filename '00_base', got '%s'", mod.Filename)
+		}
+	}
+}
+
+// TestEffectiveModulesWithMixed tests AC9.4: effective module set shows both direct and tag-based modules.
+func TestEffectiveModulesWithMixed(t *testing.T) {
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	// Create tag
+	tag, err := store.CreateTag(ctx, "webservers")
+	if err != nil {
+		t.Fatalf("Failed to create tag: %v", err)
+	}
+
+	// Create agent and assign tag
+	agent := db.Agent{
+		ID:         "agent-mixed-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	err = store.UpsertAgent(ctx, agent)
+	if err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	err = store.SetAgentTags(ctx, "agent-mixed-1", []int64{tag.ID})
+	if err != nil {
+		t.Fatalf("Failed to set agent tags: %v", err)
+	}
+
+	// Assign mod_a directly
+	agentID := "agent-mixed-1"
+	err = store.AssignModule(ctx, "mod_a", &agentID, nil)
+	if err != nil {
+		t.Fatalf("Failed to assign module directly: %v", err)
+	}
+
+	// Assign mod_b to tag
+	err = store.AssignModule(ctx, "mod_b", nil, &tag.ID)
+	if err != nil {
+		t.Fatalf("Failed to assign module to tag: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/agents/{id}/modules", s.handleGetAgentModules)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/agents/agent-mixed-1/modules")
+	if err != nil {
+		t.Fatalf("Failed to get effective modules: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result AgentEffectiveModulesResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(result.Modules) != 2 {
+		t.Errorf("Expected 2 modules, got %d", len(result.Modules))
+		return
+	}
+
+	// Find each module and check source
+	sourceMap := make(map[string]string)
+	for _, mod := range result.Modules {
+		sourceMap[mod.Name] = mod.Source
+	}
+
+	if source, ok := sourceMap["mod_a"]; !ok || source != "direct" {
+		t.Errorf("Expected mod_a with source 'direct', got source '%s'", source)
+	}
+
+	if source, ok := sourceMap["mod_b"]; !ok || source != "tag:webservers" {
+		t.Errorf("Expected mod_b with source 'tag:webservers', got source '%s'", source)
 	}
 }
