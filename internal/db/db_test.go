@@ -727,10 +727,13 @@ func TestListAssignments_ReturnsAllAssignments(t *testing.T) {
 		t.Fatalf("UpsertAgent failed: %v", err)
 	}
 
-	tag, _ := store.CreateTag(ctx, "prod")
+	tag, err := store.CreateTag(ctx, "prod")
+	if err != nil {
+		t.Fatalf("CreateTag failed: %v", err)
+	}
 
 	// Create direct assignment
-	_, err := store.AssignModule(ctx, "mod_a", &agent.ID, nil)
+	_, err = store.AssignModule(ctx, "mod_a", &agent.ID, nil)
 	if err != nil {
 		t.Fatalf("AssignModule direct failed: %v", err)
 	}
@@ -818,10 +821,13 @@ func TestGetAgentModuleDetails_TagAssignment(t *testing.T) {
 		t.Fatalf("UpsertAgent failed: %v", err)
 	}
 
-	tag, _ := store.CreateTag(ctx, "prod")
+	tag, err := store.CreateTag(ctx, "prod")
+	if err != nil {
+		t.Fatalf("CreateTag failed: %v", err)
+	}
 
 	// Assign module to tag
-	_, err := store.AssignModule(ctx, "mod_b", nil, &tag.ID)
+	_, err = store.AssignModule(ctx, "mod_b", nil, &tag.ID)
 	if err != nil {
 		t.Fatalf("AssignModule failed: %v", err)
 	}
@@ -862,10 +868,13 @@ func TestGetAgentModuleDetails_BothDirectAndTag(t *testing.T) {
 		t.Fatalf("UpsertAgent failed: %v", err)
 	}
 
-	tag, _ := store.CreateTag(ctx, "prod")
+	tag, err := store.CreateTag(ctx, "prod")
+	if err != nil {
+		t.Fatalf("CreateTag failed: %v", err)
+	}
 
 	// Assign mod_a directly
-	_, err := store.AssignModule(ctx, "mod_a", &agent.ID, nil)
+	_, err = store.AssignModule(ctx, "mod_a", &agent.ID, nil)
 	if err != nil {
 		t.Fatalf("AssignModule direct failed: %v", err)
 	}
@@ -928,10 +937,13 @@ func TestGetAgentModuleDetails_Deduplication(t *testing.T) {
 		t.Fatalf("UpsertAgent failed: %v", err)
 	}
 
-	tag, _ := store.CreateTag(ctx, "prod")
+	tag, err := store.CreateTag(ctx, "prod")
+	if err != nil {
+		t.Fatalf("CreateTag failed: %v", err)
+	}
 
 	// Assign same module both directly and to tag
-	_, err := store.AssignModule(ctx, "mod_x", &agent.ID, nil)
+	_, err = store.AssignModule(ctx, "mod_x", &agent.ID, nil)
 	if err != nil {
 		t.Fatalf("AssignModule direct failed: %v", err)
 	}
