@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,7 +50,7 @@ func NewLoader(dir string) *Loader {
 // LoadAll reads all module scripts from the loader's directory, hashing them
 // and comparing against cached entries. Only files with changed hashes or new
 // files are re-parsed for metadata.
-func (l *Loader) LoadAll() ([]Module, error) {
+func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -85,7 +86,7 @@ func (l *Loader) LoadAll() ([]Module, error) {
 				newCache[filename] = cached
 			} else {
 				// Hash differs or file is new - parse metadata
-				module, err := l.parseModule(filename, string(contents), hashHex)
+				module, err := l.parseModule(ctx, filename, string(contents), hashHex)
 				if err != nil {
 					slog.Warn("failed to parse module metadata", "file", filename, "error", err)
 					continue
@@ -112,7 +113,7 @@ func (l *Loader) LoadAll() ([]Module, error) {
 
 // parseModule executes the module script with the "metadata" argument to extract
 // metadata, then returns a new Module struct.
-func (l *Loader) parseModule(filename, scriptContent, hashHex string) (*Module, error) {
+func (l *Loader) parseModule(ctx context.Context, filename, scriptContent, hashHex string) (*Module, error) {
 	// Write script to a temporary file
 	tmpFile, err := os.CreateTemp("", "anchor-module-*")
 	if err != nil {
@@ -135,7 +136,7 @@ func (l *Loader) parseModule(filename, scriptContent, hashHex string) (*Module, 
 	}
 
 	// Execute with "metadata" argument
-	cmd := exec.Command(tmpPath, "metadata")
+	cmd := exec.CommandContext(ctx, tmpPath, "metadata")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("executing metadata command: %w", err)

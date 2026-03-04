@@ -96,7 +96,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load current modules
-	if _, err := s.loader.LoadAll(); err != nil {
+	if _, err := s.loader.LoadAll(r.Context()); err != nil {
 		slog.Error("load modules error", "error", err)
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return

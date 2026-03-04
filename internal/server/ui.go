@@ -633,7 +633,7 @@ type ListModulesResponse struct {
 
 // handleListModules handles GET /api/modules.
 func (s *Server) handleListModules(w http.ResponseWriter, r *http.Request) {
-	modules, err := s.loader.LoadAll()
+	modules, err := s.loader.LoadAll(r.Context())
 	if err != nil {
 		slog.Error("failed to load modules", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

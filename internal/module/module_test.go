@@ -45,7 +45,7 @@ func TestLoadAllBasic(t *testing.T) {
 	writeTestModule(t, dir, "10_users", "User Management", "Manage system users")
 
 	// Load all modules
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestLoadAllNewFile(t *testing.T) {
 
 	// Load initially with one module
 	writeTestModule(t, dir, "00_base", "Base", "Base setup")
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestLoadAllNewFile(t *testing.T) {
 	writeTestModule(t, dir, "20_networking", "Networking", "Network configuration")
 
 	// Load again
-	modules, err = loader.LoadAll()
+	modules, err = loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestLoadAllModifiedFile(t *testing.T) {
 
 	// Create initial module
 	writeTestModule(t, dir, "00_base", "Old Name", "Old description")
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestLoadAllModifiedFile(t *testing.T) {
 	writeTestModule(t, dir, "00_base", "New Name", "New description")
 
 	// Load again
-	modules, err = loader.LoadAll()
+	modules, err = loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestLoadAllRemovedFile(t *testing.T) {
 	// Create two modules
 	writeTestModule(t, dir, "00_base", "Base", "Base setup")
 	writeTestModule(t, dir, "10_users", "Users", "User management")
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestLoadAllRemovedFile(t *testing.T) {
 	}
 
 	// Load again
-	modules, err = loader.LoadAll()
+	modules, err = loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -236,7 +236,7 @@ esac
 	}
 
 	// First LoadAll
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("first LoadAll failed: %v", err)
 	}
@@ -255,7 +255,7 @@ esac
 	}
 
 	// Second LoadAll - should NOT re-execute metadata
-	modules, err = loader.LoadAll()
+	modules, err = loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("second LoadAll failed: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestLoadAllSortedOrder(t *testing.T) {
 	writeTestModule(t, dir, "00_base", "Base", "Base setup")
 	writeTestModule(t, dir, "10_services", "Services", "Service management")
 
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -329,7 +329,7 @@ esac
 	}
 
 	// LoadAll should succeed but skip the invalid module
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestLoadAllEmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	loader := NewLoader(dir)
 
-	modules, err := loader.LoadAll()
+	modules, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestGetModule(t *testing.T) {
 	writeTestModule(t, dir, "10_users", "Users", "User management")
 
 	// Load modules first
-	_, err := loader.LoadAll()
+	_, err := loader.LoadAll(t.Context())
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}

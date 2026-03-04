@@ -244,7 +244,7 @@ func TestCheckinWithModules(t *testing.T) {
 	writeTestModule(t, modulesDir, "test_module", "test_module")
 
 	// Load modules
-	if _, err := loader.LoadAll(); err != nil {
+	if _, err := loader.LoadAll(t.Context()); err != nil {
 		t.Fatalf("Failed to load modules: %v", err)
 	}
 
@@ -419,7 +419,7 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 	writeTestModule(t, modulesDir, "modB", "modB")
 
 	// Load modules
-	if _, err := loader.LoadAll(); err != nil {
+	if _, err := loader.LoadAll(t.Context()); err != nil {
 		t.Fatalf("Failed to load modules: %v", err)
 	}
 
@@ -501,7 +501,7 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 	writeTestModule(t, modulesDir, "sharedMod", "sharedMod")
 
 	// Load modules
-	if _, err := loader.LoadAll(); err != nil {
+	if _, err := loader.LoadAll(t.Context()); err != nil {
 		t.Fatalf("Failed to load modules: %v", err)
 	}
 
