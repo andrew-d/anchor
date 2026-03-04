@@ -234,6 +234,7 @@ function AgentDetail({ id }) {
             </div>
 
             <dl class="agent-info">
+                <dt>UUID</dt><dd><code>${agent.id}</code></dd>
                 <dt>Remote IP</dt><dd>${agent.remote_ip}</dd>
                 <dt>OS / Arch</dt><dd>${agent.os} / ${agent.arch}</dd>
                 <dt>Distro</dt><dd>${agent.distro}</dd>
