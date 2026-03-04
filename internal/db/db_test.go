@@ -695,6 +695,280 @@ func TestGetModuleHistory_DescendingOrder(t *testing.T) {
 	}
 }
 
+func TestListAssignments_EmptyDatabase(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	assignments, err := store.ListAssignments(context.Background())
+	if err != nil {
+		t.Fatalf("ListAssignments failed: %v", err)
+	}
+
+	if len(assignments) != 0 {
+		t.Errorf("Expected 0 assignments, got %d", len(assignments))
+	}
+}
+
+func TestListAssignments_ReturnsAllAssignments(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	tag, _ := store.CreateTag(ctx, "prod")
+
+	// Create direct assignment
+	if err := store.AssignModule(ctx, "mod_a", &agent.ID, nil); err != nil {
+		t.Fatalf("AssignModule direct failed: %v", err)
+	}
+
+	// Create tag assignment
+	if err := store.AssignModule(ctx, "mod_b", nil, &tag.ID); err != nil {
+		t.Fatalf("AssignModule tag failed: %v", err)
+	}
+
+	assignments, err := store.ListAssignments(ctx)
+	if err != nil {
+		t.Fatalf("ListAssignments failed: %v", err)
+	}
+
+	if len(assignments) != 2 {
+		t.Errorf("Expected 2 assignments, got %d", len(assignments))
+	}
+
+	// Check that mod_a is direct and mod_b is tag
+	for _, a := range assignments {
+		if a.ModuleName == "mod_a" {
+			if a.AgentID == nil || *a.AgentID != agent.ID {
+				t.Errorf("mod_a should be assigned to agent %s", agent.ID)
+			}
+			if a.TagID != nil {
+				t.Error("mod_a should not have tag_id")
+			}
+		} else if a.ModuleName == "mod_b" {
+			if a.AgentID != nil {
+				t.Error("mod_b should not have agent_id")
+			}
+			if a.TagID == nil || *a.TagID != tag.ID {
+				t.Errorf("mod_b should be assigned to tag %d", tag.ID)
+			}
+		}
+	}
+}
+
+func TestGetAgentModuleDetails_DirectAssignment(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Assign module directly to agent
+	if err := store.AssignModule(ctx, "mod_a", &agent.ID, nil); err != nil {
+		t.Fatalf("AssignModule failed: %v", err)
+	}
+
+	details, err := store.GetAgentModuleDetails(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentModuleDetails failed: %v", err)
+	}
+
+	if len(details) != 1 {
+		t.Errorf("Expected 1 module, got %d", len(details))
+	}
+
+	if details[0].ModuleName != "mod_a" {
+		t.Errorf("Expected module mod_a, got %s", details[0].ModuleName)
+	}
+	if details[0].Source != "direct" {
+		t.Errorf("Expected source 'direct', got %s", details[0].Source)
+	}
+	if details[0].AssignmentID == 0 {
+		t.Error("AssignmentID should be set")
+	}
+}
+
+func TestGetAgentModuleDetails_TagAssignment(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	tag, _ := store.CreateTag(ctx, "prod")
+
+	// Assign module to tag
+	if err := store.AssignModule(ctx, "mod_b", nil, &tag.ID); err != nil {
+		t.Fatalf("AssignModule failed: %v", err)
+	}
+
+	// Assign tag to agent
+	if err := store.SetAgentTags(ctx, agent.ID, []int64{tag.ID}); err != nil {
+		t.Fatalf("SetAgentTags failed: %v", err)
+	}
+
+	details, err := store.GetAgentModuleDetails(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentModuleDetails failed: %v", err)
+	}
+
+	if len(details) != 1 {
+		t.Errorf("Expected 1 module, got %d", len(details))
+	}
+
+	if details[0].ModuleName != "mod_b" {
+		t.Errorf("Expected module mod_b, got %s", details[0].ModuleName)
+	}
+	if details[0].Source != "tag:prod" {
+		t.Errorf("Expected source 'tag:prod', got %s", details[0].Source)
+	}
+	if details[0].AssignmentID == 0 {
+		t.Error("AssignmentID should be set")
+	}
+}
+
+func TestGetAgentModuleDetails_BothDirectAndTag(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	tag, _ := store.CreateTag(ctx, "prod")
+
+	// Assign mod_a directly
+	if err := store.AssignModule(ctx, "mod_a", &agent.ID, nil); err != nil {
+		t.Fatalf("AssignModule direct failed: %v", err)
+	}
+
+	// Assign mod_b to tag
+	if err := store.AssignModule(ctx, "mod_b", nil, &tag.ID); err != nil {
+		t.Fatalf("AssignModule tag failed: %v", err)
+	}
+
+	// Assign tag to agent
+	if err := store.SetAgentTags(ctx, agent.ID, []int64{tag.ID}); err != nil {
+		t.Fatalf("SetAgentTags failed: %v", err)
+	}
+
+	details, err := store.GetAgentModuleDetails(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentModuleDetails failed: %v", err)
+	}
+
+	if len(details) != 2 {
+		t.Errorf("Expected 2 modules, got %d", len(details))
+	}
+
+	// Check mod_a is direct
+	var modA, modB *AgentModuleDetail
+	for i := range details {
+		if details[i].ModuleName == "mod_a" {
+			modA = &details[i]
+		}
+		if details[i].ModuleName == "mod_b" {
+			modB = &details[i]
+		}
+	}
+
+	if modA == nil {
+		t.Fatal("mod_a not found in details")
+	}
+	if modA.Source != "direct" {
+		t.Errorf("mod_a: expected source 'direct', got %s", modA.Source)
+	}
+
+	if modB == nil {
+		t.Fatal("mod_b not found in details")
+	}
+	if modB.Source != "tag:prod" {
+		t.Errorf("mod_b: expected source 'tag:prod', got %s", modB.Source)
+	}
+}
+
+func TestGetAgentModuleDetails_Deduplication(t *testing.T) {
+	// When a module is assigned both directly and via tag, only direct appears
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	tag, _ := store.CreateTag(ctx, "prod")
+
+	// Assign same module both directly and to tag
+	if err := store.AssignModule(ctx, "mod_x", &agent.ID, nil); err != nil {
+		t.Fatalf("AssignModule direct failed: %v", err)
+	}
+
+	if err := store.AssignModule(ctx, "mod_x", nil, &tag.ID); err != nil {
+		t.Fatalf("AssignModule tag failed: %v", err)
+	}
+
+	// Assign tag to agent
+	if err := store.SetAgentTags(ctx, agent.ID, []int64{tag.ID}); err != nil {
+		t.Fatalf("SetAgentTags failed: %v", err)
+	}
+
+	details, err := store.GetAgentModuleDetails(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentModuleDetails failed: %v", err)
+	}
+
+	if len(details) != 1 {
+		t.Errorf("Expected 1 module (deduplicated), got %d", len(details))
+	}
+
+	if details[0].ModuleName != "mod_x" {
+		t.Errorf("Expected module mod_x, got %s", details[0].ModuleName)
+	}
+	if details[0].Source != "direct" {
+		t.Errorf("Expected source 'direct' (not tag), got %s", details[0].Source)
+	}
+}
+
+func TestGetAgentModuleDetails_NoModules(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	details, err := store.GetAgentModuleDetails(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentModuleDetails failed: %v", err)
+	}
+
+	if len(details) != 0 {
+		t.Errorf("Expected 0 modules, got %d", len(details))
+	}
+}
+
 // Helper function to create a test store with a temporary database.
 func newTestStore(t *testing.T) *SQLiteStore {
 	tmpDir := t.TempDir()

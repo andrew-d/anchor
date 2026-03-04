@@ -354,3 +354,115 @@ ORDER BY executed_at DESC
 	}
 	return results, rows.Err()
 }
+
+// ListAssignments returns all module assignments, ordered by module_name.
+func (s *SQLiteStore) ListAssignments(ctx context.Context) ([]ModuleAssignment, error) {
+	query := `SELECT id, module_name, agent_id, tag_id FROM module_assignments ORDER BY module_name`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var assignments []ModuleAssignment
+	for rows.Next() {
+		var assignment ModuleAssignment
+		if err := rows.Scan(&assignment.ID, &assignment.ModuleName, &assignment.AgentID, &assignment.TagID); err != nil {
+			return nil, err
+		}
+		assignments = append(assignments, assignment)
+	}
+	return assignments, rows.Err()
+}
+
+// GetAgentModuleDetails returns all modules for an agent with source information (direct or via tag).
+// Deduplicates modules, preferring direct assignments over tag assignments.
+func (s *SQLiteStore) GetAgentModuleDetails(ctx context.Context, agentID string) ([]AgentModuleDetail, error) {
+	// Query direct assignments
+	directQuery := `SELECT id, module_name FROM module_assignments WHERE agent_id = ?`
+	directRows, err := s.db.QueryContext(ctx, directQuery, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer directRows.Close()
+
+	// Store direct assignments in a map for deduplication
+	directModules := make(map[string]AgentModuleDetail)
+	for directRows.Next() {
+		var id int64
+		var moduleName string
+		if err := directRows.Scan(&id, &moduleName); err != nil {
+			return nil, err
+		}
+		directModules[moduleName] = AgentModuleDetail{
+			ModuleName:   moduleName,
+			Source:       "direct",
+			AssignmentID: id,
+		}
+	}
+	if err := directRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Query tag-based assignments
+	tagQuery := `
+SELECT ma.id, ma.module_name, t.name FROM module_assignments ma
+JOIN tags t ON ma.tag_id = t.id
+JOIN agent_tags at ON at.tag_id = t.id
+WHERE at.agent_id = ?
+ORDER BY ma.module_name
+`
+	tagRows, err := s.db.QueryContext(ctx, tagQuery, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer tagRows.Close()
+
+	result := make([]AgentModuleDetail, 0, len(directModules))
+	// Add direct modules to result first
+	for _, detail := range directModules {
+		result = append(result, detail)
+	}
+
+	// Process tag assignments, only adding if not already present from direct
+	seenTags := make(map[string]bool)
+	for moduleName := range directModules {
+		seenTags[moduleName] = true
+	}
+
+	for tagRows.Next() {
+		var id int64
+		var moduleName, tagName string
+		if err := tagRows.Scan(&id, &moduleName, &tagName); err != nil {
+			return nil, err
+		}
+		// Only add if not already present from direct assignment
+		if !seenTags[moduleName] {
+			result = append(result, AgentModuleDetail{
+				ModuleName:   moduleName,
+				Source:       "tag:" + tagName,
+				AssignmentID: id,
+			})
+			seenTags[moduleName] = true
+		}
+	}
+	if err := tagRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Sort by module name
+	sortAgentModuleDetails(result)
+
+	return result, nil
+}
+
+// sortAgentModuleDetails sorts a slice of AgentModuleDetail by ModuleName.
+func sortAgentModuleDetails(details []AgentModuleDetail) {
+	for i := 0; i < len(details); i++ {
+		for j := i + 1; j < len(details); j++ {
+			if details[j].ModuleName < details[i].ModuleName {
+				details[i], details[j] = details[j], details[i]
+			}
+		}
+	}
+}

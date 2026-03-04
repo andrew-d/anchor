@@ -33,6 +33,13 @@ type ModuleAssignment struct {
 	TagID      *int64  // nullable; if set, this is a tag assignment (inherited by tag members)
 }
 
+// AgentModuleDetail represents a module with its source information for an agent.
+type AgentModuleDetail struct {
+	ModuleName   string
+	Source       string // "direct" or "tag:<tagname>"
+	AssignmentID int64  // ID from module_assignments, for deletion
+}
+
 // ModuleResult represents the outcome of a module execution.
 type ModuleResult struct {
 	ID         int64
@@ -64,6 +71,8 @@ type Store interface {
 	AssignModule(ctx context.Context, moduleName string, agentID *string, tagID *int64) error
 	UnassignModule(ctx context.Context, id int64) error
 	GetAgentModules(ctx context.Context, agentID string) ([]string, error)
+	ListAssignments(ctx context.Context) ([]ModuleAssignment, error)
+	GetAgentModuleDetails(ctx context.Context, agentID string) ([]AgentModuleDetail, error)
 
 	// Module results
 	InsertModuleResult(ctx context.Context, result ModuleResult) error
