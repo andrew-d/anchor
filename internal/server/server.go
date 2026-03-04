@@ -48,6 +48,8 @@ func (s *Server) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/checkin", s.handleCheckin)
 	mux.HandleFunc("POST /api/report", s.handleReport)
+	mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	mux.HandleFunc("GET /api/agents/{id}", s.handleGetAgent)
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "anchor server")
 	})
