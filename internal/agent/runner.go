@@ -2,9 +2,11 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
+	"strings"
 )
 
 // Module represents a module to be executed.
@@ -12,13 +14,6 @@ type Module struct {
 	Name   string
 	Script string
 }
-
-// ModuleSlice allows sorting modules by name.
-type ModuleSlice []Module
-
-func (m ModuleSlice) Len() int           { return len(m) }
-func (m ModuleSlice) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m ModuleSlice) Less(i, j int) bool { return m[i].Name < m[j].Name }
 
 // ModuleResult contains the result of running a single module.
 type ModuleResult struct {
@@ -31,7 +26,7 @@ type ModuleResult struct {
 // runModule executes a module script and returns its result.
 // The script is written to a temporary file, made executable, and run with the "apply" argument.
 // Exit code 0 is mapped to "ok", exit code 80 to "changed", and all other codes to "error".
-func runModule(name string, script string) ModuleResult {
+func runModule(ctx context.Context, name string, script string) ModuleResult {
 	result := ModuleResult{
 		ModuleName: name,
 	}
@@ -66,7 +61,7 @@ func runModule(name string, script string) ModuleResult {
 	}
 
 	// Execute with "apply" argument
-	cmd := exec.Command(tmpFile.Name(), "apply")
+	cmd := exec.CommandContext(ctx, tmpFile.Name(), "apply")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -100,6 +95,8 @@ func runModule(name string, script string) ModuleResult {
 func SortModules(modules []Module) []Module {
 	sorted := make([]Module, len(modules))
 	copy(sorted, modules)
-	sort.Sort(ModuleSlice(sorted))
+	slices.SortFunc(sorted, func(a, b Module) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	return sorted
 }

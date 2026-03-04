@@ -165,7 +165,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 
 			// Execute module
-			moduleResult := runModule(mod.Name, mod.Script)
+			moduleResult := runModule(ctx, mod.Name, mod.Script)
 			slog.Info("module executed", "module", mod.Name, "status", moduleResult.Status)
 
 			// Build report request

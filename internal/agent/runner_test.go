@@ -11,7 +11,7 @@ func TestRunModuleExitCode0(t *testing.T) {
 echo "test output"
 exit 0
 `
-	result := runModule("test_module", script)
+	result := runModule(t.Context(), "test_module", script)
 
 	if result.ModuleName != "test_module" {
 		t.Errorf("ModuleName: got %q, want %q", result.ModuleName, "test_module")
@@ -29,7 +29,7 @@ func TestRunModuleExitCode80(t *testing.T) {
 echo "changed output"
 exit 80
 `
-	result := runModule("test_changed", script)
+	result := runModule(t.Context(), "test_changed", script)
 
 	if result.Status != "changed" {
 		t.Errorf("Status: got %q, want %q", result.Status, "changed")
@@ -45,7 +45,7 @@ echo "stdout output"
 echo "stderr output" >&2
 exit 1
 `
-	result := runModule("test_error", script)
+	result := runModule(t.Context(), "test_error", script)
 
 	if result.Status != "error" {
 		t.Errorf("Status: got %q, want %q", result.Status, "error")
@@ -98,7 +98,7 @@ func TestRunModuleTableDriven(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := runModule(tt.name, tt.script)
+			result := runModule(t.Context(), tt.name, tt.script)
 
 			if result.Status != tt.expectedStatus {
 				t.Errorf("Status: got %q, want %q", result.Status, tt.expectedStatus)
