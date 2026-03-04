@@ -237,7 +237,7 @@ function AgentDetail({ id }) {
                 <dt>Remote IP</dt><dd>${agent.remote_ip}</dd>
                 <dt>OS / Arch</dt><dd>${agent.os} / ${agent.arch}</dd>
                 <dt>Distro</dt><dd>${agent.distro}</dd>
-                <dt>Last Seen</dt><dd title=${formatTime(agent.last_seen_at).utc}>${formatTime(agent.last_seen_at).local}</dd>
+                <dt>Last Seen</dt><dd><span class="hint-hover" title=${formatTime(agent.last_seen_at).utc}>${formatTime(agent.last_seen_at).local}</span></dd>
             </dl>
 
             <h3>Tags</h3>

@@ -52,6 +52,7 @@ header a { color: white; text-decoration: none; }
 .agent-info { background: white; padding: 1rem; border: 1px solid #e5e7eb; margin-bottom: 1rem; border-radius: 4px; }
 .agent-info dt { font-weight: 600; color: #6b7280; font-size: 0.875rem; }
 .agent-info dd { margin-bottom: 0.5rem; }
+.hint-hover { border-bottom: 1px dotted #9ca3af; cursor: help; }
 
 /* Agent name edit */
 .agent-name-edit {
