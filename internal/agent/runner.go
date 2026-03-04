@@ -6,7 +6,21 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"sort"
 )
+
+// Module represents a module to be executed.
+type Module struct {
+	Name   string
+	Script string
+}
+
+// ModuleSlice allows sorting modules by name.
+type ModuleSlice []Module
+
+func (m ModuleSlice) Len() int           { return len(m) }
+func (m ModuleSlice) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
+func (m ModuleSlice) Less(i, j int) bool { return m[i].Name < m[j].Name }
 
 // ModuleResult contains the result of running a single module.
 type ModuleResult struct {
@@ -74,4 +88,12 @@ func runModule(name string, script string) ModuleResult {
 	}
 
 	return result
+}
+
+// SortModules returns a copy of the modules sorted by name.
+func SortModules(modules []Module) []Module {
+	sorted := make([]Module, len(modules))
+	copy(sorted, modules)
+	sort.Sort(ModuleSlice(sorted))
+	return sorted
 }
