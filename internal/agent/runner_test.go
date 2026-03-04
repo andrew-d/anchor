@@ -114,41 +114,19 @@ func TestRunModuleTableDriven(t *testing.T) {
 }
 
 func TestModuleExecutionOrdering(t *testing.T) {
-	modules := []struct {
-		name   string
-		script string
-	}{
+	modules := []Module{
 		{"10_users", "#!/bin/sh\nexit 0\n"},
 		{"00_base", "#!/bin/sh\nexit 0\n"},
 		{"05_packages", "#!/bin/sh\nexit 0\n"},
 	}
 
-	// Sort modules by name
-	sortedModules := make([]struct {
-		name   string
-		script string
-	}, len(modules))
-	copy(sortedModules, modules)
-	sortByName(sortedModules)
+	// Sort modules by name using SortModules
+	sortedModules := SortModules(modules)
 
 	expectedOrder := []string{"00_base", "05_packages", "10_users"}
 	for i, expected := range expectedOrder {
-		if sortedModules[i].name != expected {
-			t.Errorf("Module at index %d: got %q, want %q", i, sortedModules[i].name, expected)
-		}
-	}
-}
-
-// Helper function to sort modules by name
-func sortByName(modules []struct {
-	name   string
-	script string
-}) {
-	for i := 0; i < len(modules); i++ {
-		for j := i + 1; j < len(modules); j++ {
-			if modules[j].name < modules[i].name {
-				modules[i], modules[j] = modules[j], modules[i]
-			}
+		if sortedModules[i].Name != expected {
+			t.Errorf("Module at index %d: got %q, want %q", i, sortedModules[i].Name, expected)
 		}
 	}
 }
