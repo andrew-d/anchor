@@ -106,14 +106,24 @@ func (a *Agent) Run(ctx context.Context) error {
 		reqBody, err := json.Marshal(checkinReq)
 		if err != nil {
 			slog.Error("failed to marshal checkin request", "error", err)
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				slog.Info("agent shutdown requested")
+				return nil
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 
 		resp, err := http.Post(checkinURL, "application/json", bytes.NewReader(reqBody))
 		if err != nil {
 			slog.Error("checkin request failed", "error", err, "url", checkinURL)
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				slog.Info("agent shutdown requested")
+				return nil
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 
@@ -122,7 +132,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err := json.NewDecoder(resp.Body).Decode(&checkinResp); err != nil {
 			resp.Body.Close()
 			slog.Error("failed to decode checkin response", "error", err)
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				slog.Info("agent shutdown requested")
+				return nil
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 		resp.Body.Close()
@@ -189,7 +204,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		// If report failed, stop executing remaining modules and log the failure
 		if reportFailed {
 			slog.Error("report failed, stopping module execution")
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				slog.Info("agent shutdown requested")
+				return nil
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 

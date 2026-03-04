@@ -28,7 +28,7 @@ func TestParseDistroFromOSRelease(t *testing.T) {
 		},
 		{
 			name:     "missing PRETTY_NAME",
-			content:  `NAME="Ubuntu"\nVERSION_ID="24.04"`,
+			content:  "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"",
 			expected: "unknown",
 		},
 		{
