@@ -2,9 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/andrew-d/anchor/internal/db"
 )
 
 // UIAgentResponse represents an agent in the list response.
@@ -99,7 +102,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	staleThreshold := int64(2 * s.pollInterval)
 
 	// Convert to response format
-	var agentResponses []UIAgentResponse
+	agentResponses := []UIAgentResponse{}
 	for _, agent := range agents {
 		// Get module results for this agent
 		moduleResults, err := s.store.GetLatestModuleResults(ctx, agent.ID)
@@ -126,7 +129,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var tagResponses []UITagResponse
+		tagResponses := []UITagResponse{}
 		for _, tag := range tags {
 			tagResponses = append(tagResponses, UITagResponse{
 				ID:   tag.ID,
@@ -171,8 +174,13 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	// Get agent
 	agent, err := s.store.GetAgent(ctx, agentID)
 	if err != nil {
-		slog.Debug("agent not found", "agent_id", agentID, "error", err)
-		http.Error(w, "not found", http.StatusNotFound)
+		if errors.Is(err, db.ErrNotFound) {
+			slog.Debug("agent not found", "agent_id", agentID, "error", err)
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		slog.Error("failed to get agent", "agent_id", agentID, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -216,7 +224,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	s.computeHealth(&uiAgent, now, staleThreshold)
 
 	// Convert tags
-	var tagResponses []UITagResponse
+	tagResponses := []UITagResponse{}
 	for _, tag := range tags {
 		tagResponses = append(tagResponses, UITagResponse{
 			ID:   tag.ID,
@@ -225,7 +233,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert module results
-	var moduleResultResponses []UIModuleResultResponse
+	moduleResultResponses := []UIModuleResultResponse{}
 	for _, mr := range moduleResults {
 		moduleResultResponses = append(moduleResultResponses, UIModuleResultResponse{
 			ModuleName: mr.ModuleName,

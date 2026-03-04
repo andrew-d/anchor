@@ -54,7 +54,10 @@ func (s *Server) Run() error {
 	mux.HandleFunc("GET /api/agents/{id}", s.handleGetAgent)
 
 	// Serve static files from embedded filesystem
-	staticSub, _ := fs.Sub(anchostatic.FS, ".")
+	staticSub, err := fs.Sub(anchostatic.FS, ".")
+	if err != nil {
+		return fmt.Errorf("creating static filesystem sub: %w", err)
+	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
 	// Serve index.html for the SPA entry point
@@ -65,7 +68,9 @@ func (s *Server) Run() error {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			slog.Error("failed to write response", "error", err)
+		}
 	})
 
 	addr := fmt.Sprintf(":%d", s.port)

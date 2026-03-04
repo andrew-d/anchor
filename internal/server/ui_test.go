@@ -77,15 +77,15 @@ func TestListAgentsHealthyStatus(t *testing.T) {
 		t.Errorf("Expected 1 agent, got %d", len(result.Agents))
 	}
 
-	agent_resp := result.Agents[0]
-	if agent_resp.Health != "healthy" {
-		t.Errorf("Expected health 'healthy', got '%s'", agent_resp.Health)
+	agentResp := result.Agents[0]
+	if agentResp.Health != "healthy" {
+		t.Errorf("Expected health 'healthy', got '%s'", agentResp.Health)
 	}
-	if agent_resp.ModuleCount != 2 {
-		t.Errorf("Expected module_count 2, got %d", agent_resp.ModuleCount)
+	if agentResp.ModuleCount != 2 {
+		t.Errorf("Expected module_count 2, got %d", agentResp.ModuleCount)
 	}
-	if agent_resp.ErrorCount != 0 {
-		t.Errorf("Expected error_count 0, got %d", agent_resp.ErrorCount)
+	if agentResp.ErrorCount != 0 {
+		t.Errorf("Expected error_count 0, got %d", agentResp.ErrorCount)
 	}
 }
 
@@ -143,12 +143,12 @@ func TestListAgentsUnhealthyStatus(t *testing.T) {
 		t.Errorf("Expected 1 agent, got %d", len(result.Agents))
 	}
 
-	agent_resp := result.Agents[0]
-	if agent_resp.Health != "unhealthy" {
-		t.Errorf("Expected health 'unhealthy', got '%s'", agent_resp.Health)
+	agentResp := result.Agents[0]
+	if agentResp.Health != "unhealthy" {
+		t.Errorf("Expected health 'unhealthy', got '%s'", agentResp.Health)
 	}
-	if agent_resp.ErrorCount != 1 {
-		t.Errorf("Expected error_count 1, got %d", agent_resp.ErrorCount)
+	if agentResp.ErrorCount != 1 {
+		t.Errorf("Expected error_count 1, got %d", agentResp.ErrorCount)
 	}
 }
 
@@ -194,9 +194,9 @@ func TestListAgentsStaleStatus(t *testing.T) {
 		t.Errorf("Expected 1 agent, got %d", len(result.Agents))
 	}
 
-	agent_resp := result.Agents[0]
-	if agent_resp.Health != "stale" {
-		t.Errorf("Expected health 'stale', got '%s'", agent_resp.Health)
+	agentResp := result.Agents[0]
+	if agentResp.Health != "stale" {
+		t.Errorf("Expected health 'stale', got '%s'", agentResp.Health)
 	}
 }
 
@@ -241,12 +241,12 @@ func TestListAgentsHealthyNoModules(t *testing.T) {
 		t.Errorf("Expected 1 agent, got %d", len(result.Agents))
 	}
 
-	agent_resp := result.Agents[0]
-	if agent_resp.Health != "healthy" {
-		t.Errorf("Expected health 'healthy', got '%s'", agent_resp.Health)
+	agentResp := result.Agents[0]
+	if agentResp.Health != "healthy" {
+		t.Errorf("Expected health 'healthy', got '%s'", agentResp.Health)
 	}
-	if agent_resp.ModuleCount != 0 {
-		t.Errorf("Expected module_count 0, got %d", agent_resp.ModuleCount)
+	if agentResp.ModuleCount != 0 {
+		t.Errorf("Expected module_count 0, got %d", agentResp.ModuleCount)
 	}
 }
 
@@ -421,7 +421,10 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		Distro:     "ubuntu-24.04",
 		LastSeenAt: now,
 	}
-	store.UpsertAgent(context.Background(), agent1)
+	err := store.UpsertAgent(context.Background(), agent1)
+	if err != nil {
+		t.Fatalf("Failed to upsert healthy agent: %v", err)
+	}
 
 	// Create unhealthy agent
 	agent2 := db.Agent{
@@ -433,8 +436,11 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		Distro:     "ubuntu-24.04",
 		LastSeenAt: now,
 	}
-	store.UpsertAgent(context.Background(), agent2)
-	store.InsertModuleResult(context.Background(), db.ModuleResult{
+	err = store.UpsertAgent(context.Background(), agent2)
+	if err != nil {
+		t.Fatalf("Failed to upsert unhealthy agent: %v", err)
+	}
+	err = store.InsertModuleResult(context.Background(), db.ModuleResult{
 		AgentID:    "unhealthy-agent",
 		ModuleName: "module-a",
 		Status:     "error",
@@ -442,6 +448,9 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		Stderr:     "error",
 		ExecutedAt: now,
 	})
+	if err != nil {
+		t.Fatalf("Failed to insert module result: %v", err)
+	}
 
 	// Create stale agent
 	oldTime := now - int64(2*s.pollInterval) - 100
@@ -454,7 +463,10 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 		Distro:     "ubuntu-24.04",
 		LastSeenAt: oldTime,
 	}
-	store.UpsertAgent(context.Background(), agent3)
+	err = store.UpsertAgent(context.Background(), agent3)
+	if err != nil {
+		t.Fatalf("Failed to upsert stale agent: %v", err)
+	}
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleListAgents))
 	defer ts.Close()
