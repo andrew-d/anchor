@@ -123,5 +123,58 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 // handleReport handles POST /api/report requests.
 // Implemented in Task 4.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 4
+	// Decode JSON request body
+	var req ReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Warn("report request decode error", "error", err)
+		http.Error(w, "malformed JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.AgentID == "" {
+		slog.Warn("report request missing agent_id")
+		http.Error(w, "missing agent_id", http.StatusBadRequest)
+		return
+	}
+
+	if req.ModuleName == "" {
+		slog.Warn("report request missing module_name")
+		http.Error(w, "missing module_name", http.StatusBadRequest)
+		return
+	}
+
+	if req.Status == "" {
+		slog.Warn("report request missing status")
+		http.Error(w, "missing status", http.StatusBadRequest)
+		return
+	}
+
+	// Validate status is one of "ok", "changed", "error"
+	validStatus := req.Status == "ok" || req.Status == "changed" || req.Status == "error"
+	if !validStatus {
+		slog.Warn("report request invalid status", "status", req.Status)
+		http.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+
+	// Insert module result
+	result := db.ModuleResult{
+		AgentID:    req.AgentID,
+		ModuleName: req.ModuleName,
+		Status:     req.Status,
+		Stdout:     req.Stdout,
+		Stderr:     req.Stderr,
+		ExecutedAt: req.ExecutedAt,
+	}
+	if err := s.store.InsertModuleResult(r.Context(), result); err != nil {
+		slog.Error("insert module result error", "agent_id", req.AgentID, "module_name", req.ModuleName, "error", err)
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	resp := ReportResponse{OK: true}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
