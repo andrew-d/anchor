@@ -1,10 +1,16 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"testing"
+	"time"
 )
 
 // TestReadOrCreateUUID_GeneratesNewUUID verifies that a new UUID is generated and persisted
@@ -104,5 +110,201 @@ func TestReadOrCreateUUID_CreatesParentDir(t *testing.T) {
 	}
 	if string(content) != uuid {
 		t.Fatalf("file content does not match returned UUID: got %s, expected %s", string(content), uuid)
+	}
+}
+
+// TestAgentPollingLoop_ReportsModulesIndividually verifies that the agent checks in,
+// receives modules, executes them in sorted order, and reports each result individually (AC2.4).
+func TestAgentPollingLoop_ReportsModulesIndividually(t *testing.T) {
+	// Set up test data directory
+	dataDir := t.TempDir()
+
+	// Track requests to the server
+	var checkinCount int
+	var reportCount int
+	var reportedModules []string
+	var reportsMutex sync.Mutex
+	cancelChan := make(chan struct{})
+
+	// Create a test HTTP server that mimics the anchor server API
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/checkin" && r.Method == "POST" {
+			checkinCount++
+			// Return 2 modules with a short poll interval
+			resp := CheckinResponse{
+				PollIntervalSeconds: 10, // Long interval so we don't get multiple polls
+				Modules: []CheckinModule{
+					{Name: "02_pkg", Script: "#!/bin/sh\necho 'install packages'\nexit 0"},
+					{Name: "01_base", Script: "#!/bin/sh\necho 'configure base'\nexit 0"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		} else if r.URL.Path == "/api/report" && r.Method == "POST" {
+			reportsMutex.Lock()
+			reportCount++
+			var req ReportRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			reportedModules = append(reportedModules, req.ModuleName)
+			// After 2 reports, signal to cancel the context
+			if reportCount == 2 {
+				close(cancelChan)
+			}
+			reportsMutex.Unlock()
+
+			resp := ReportResponse{OK: true}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Create agent and run it with a context that we'll cancel after both modules are reported
+	agent := New(server.URL, dataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Run in a goroutine so we can cancel after receiving the signal
+	done := make(chan error)
+	go func() {
+		done <- agent.Run(ctx)
+	}()
+
+	// Wait for both reports to be received
+	select {
+	case <-cancelChan:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for both reports")
+		cancel()
+	}
+
+	// Wait for agent to finish
+	<-done
+
+	// Verify checkin was called
+	if checkinCount == 0 {
+		t.Fatal("checkin was never called")
+	}
+
+	// Verify both modules were reported
+	if reportCount != 2 {
+		t.Fatalf("expected 2 reports, got %d", reportCount)
+	}
+
+	// Verify modules were reported in the order they were returned (but they should have been sorted)
+	// The server returns [02_pkg, 01_base], but after sorting should be [01_base, 02_pkg]
+	expectedOrder := []string{"01_base", "02_pkg"}
+	for i, expectedModule := range expectedOrder {
+		if i >= len(reportedModules) {
+			t.Fatalf("not enough modules reported: expected %v, got %v", expectedOrder, reportedModules)
+		}
+		if reportedModules[i] != expectedModule {
+			t.Fatalf("module order mismatch: expected %v at index %d, got %s", expectedOrder, i, reportedModules[i])
+		}
+	}
+}
+
+// TestAgentPollingLoop_StopsOnReportFailure verifies that the agent stops executing
+// remaining modules if a report request fails (AC2.6).
+func TestAgentPollingLoop_StopsOnReportFailure(t *testing.T) {
+	// Set up test data directory
+	dataDir := t.TempDir()
+
+	// Track requests to the server
+	var checkinCount int
+	var reportCount int
+	var reportedModules []string
+	var reportsMutex sync.Mutex
+	failChan := make(chan struct{})
+
+	// Create a test HTTP server that fails on the second report
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/checkin" && r.Method == "POST" {
+			checkinCount++
+			// Return 3 modules
+			resp := CheckinResponse{
+				PollIntervalSeconds: 10, // Long interval so we don't get multiple polls
+				Modules: []CheckinModule{
+					{Name: "01_first", Script: "#!/bin/sh\necho 'first'\nexit 0"},
+					{Name: "02_second", Script: "#!/bin/sh\necho 'second'\nexit 0"},
+					{Name: "03_third", Script: "#!/bin/sh\necho 'third'\nexit 0"},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		} else if r.URL.Path == "/api/report" && r.Method == "POST" {
+			reportsMutex.Lock()
+			reportCount++
+			var req ReportRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			reportedModules = append(reportedModules, req.ModuleName)
+			reportsMutex.Unlock()
+
+			// Fail on the second report
+			if reportCount == 2 {
+				close(failChan)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+
+			resp := ReportResponse{OK: true}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Create agent and run it with a context that we'll cancel after the failure
+	agent := New(server.URL, dataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Run in a goroutine so we can cancel after the failure
+	done := make(chan error)
+	go func() {
+		done <- agent.Run(ctx)
+	}()
+
+	// Wait for the second report to fail
+	select {
+	case <-failChan:
+		// Give the agent time to realize the report failed and stop
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for failure")
+		cancel()
+	}
+
+	// Wait for agent to finish
+	<-done
+
+	// Verify only 2 reports were attempted (first succeeded, second failed, so third was not attempted)
+	if reportCount != 2 {
+		t.Fatalf("expected 2 reports (first succeeded, second failed), got %d", reportCount)
+	}
+
+	// Verify only first module was successfully reported (second failed, third not attempted)
+	if len(reportedModules) != 2 {
+		t.Fatalf("expected 2 modules to have been attempted to report, got %d: %v", len(reportedModules), reportedModules)
+	}
+
+	if reportedModules[0] != "01_first" {
+		t.Fatalf("expected first module to be '01_first', got %s", reportedModules[0])
+	}
+
+	if reportedModules[1] != "02_second" {
+		t.Fatalf("expected second module to be '02_second', got %s", reportedModules[1])
+	}
+
+	// The key thing is that we never reported the third module
+	// If we had, we'd have reportCount >= 3 or reportedModules containing "03_third"
+	for _, moduleName := range reportedModules {
+		if moduleName == "03_third" {
+			t.Fatalf("third module should not have been reported after second report failed")
+		}
 	}
 }

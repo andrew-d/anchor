@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -55,7 +56,7 @@ func runAgent(args []string) int {
 	}
 
 	a := agent.New(*serverURL, *dataDir)
-	if err := a.Run(); err != nil {
+	if err := a.Run(context.Background()); err != nil {
 		slog.Error("agent error", "error", err)
 		return 1
 	}
