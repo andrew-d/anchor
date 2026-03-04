@@ -64,7 +64,7 @@ func (l *Loader) LoadAll() ([]Module, error) {
 
 	for _, entry := range entries {
 		// Only process regular files, skip directories and special files
-		if !entry.IsDir() {
+		if entry.Type().IsRegular() {
 			filename := entry.Name()
 
 			// Read file contents

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -207,8 +208,9 @@ func TestLoadAllCaching(t *testing.T) {
 	dir := t.TempDir()
 	loader := NewLoader(dir)
 
-	// Create a marker file where the module script will write on metadata call
-	markerFile := filepath.Join(dir, "metadata_marker")
+	// Create a separate directory for the marker file to avoid polluting the module directory
+	markerDir := t.TempDir()
+	markerFile := filepath.Join(markerDir, "metadata_marker")
 
 	// Create a custom script that writes a marker when metadata is called
 	filename := filepath.Join(dir, "00_base")
@@ -247,7 +249,7 @@ esac
 	if err != nil {
 		t.Fatalf("failed to read marker file: %v", err)
 	}
-	lines := len(string(data))
+	lines := strings.Count(string(data), "\n")
 	if lines == 0 {
 		t.Fatal("marker file is empty after first LoadAll")
 	}
@@ -266,9 +268,9 @@ esac
 	if err != nil {
 		t.Fatalf("failed to read marker file after second LoadAll: %v", err)
 	}
-	lines2 := len(string(data))
+	lines2 := strings.Count(string(data), "\n")
 	if lines2 != lines {
-		t.Errorf("metadata was re-executed for unchanged file: marker file grew from %d bytes to %d bytes", lines, lines2)
+		t.Errorf("metadata was re-executed for unchanged file: marker file grew from %d lines to %d lines", lines, lines2)
 	}
 }
 
