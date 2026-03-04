@@ -103,7 +103,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build response modules by matching assigned names against loaded modules
-	var modules []CheckinModule
+	modules := make([]CheckinModule, 0)
 	for _, name := range assignedNames {
 		if mod, ok := s.loader.GetModule(name); ok {
 			modules = append(modules, CheckinModule{Name: name, Script: mod.Script})
@@ -117,7 +117,9 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode checkin response", "error", err)
+	}
 }
 
 // handleReport handles POST /api/report requests.
@@ -176,5 +178,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	// Return success response
 	resp := ReportResponse{OK: true}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode report response", "error", err)
+	}
 }

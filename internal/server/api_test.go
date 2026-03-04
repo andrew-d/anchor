@@ -129,6 +129,9 @@ func TestCheckinNewAgent(t *testing.T) {
 	if agent.Distro != "ubuntu-22.04" {
 		t.Errorf("Distro mismatch: got %s, want ubuntu-22.04", agent.Distro)
 	}
+	if agent.RemoteIP != "127.0.0.1" {
+		t.Errorf("RemoteIP mismatch: got %s, want 127.0.0.1", agent.RemoteIP)
+	}
 	if agent.LastSeenAt == 0 {
 		t.Errorf("LastSeenAt should be set")
 	}
@@ -512,15 +515,27 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 	}
 
 	// Create two tags
-	tag1, _ := store.CreateTag(context.Background(), "tag1")
-	tag2, _ := store.CreateTag(context.Background(), "tag2")
+	tag1, err := store.CreateTag(context.Background(), "tag1")
+	if err != nil {
+		t.Fatalf("Failed to create tag1: %v", err)
+	}
+	tag2, err := store.CreateTag(context.Background(), "tag2")
+	if err != nil {
+		t.Fatalf("Failed to create tag2: %v", err)
+	}
 
 	// Assign agent to both tags
-	store.SetAgentTags(context.Background(), "agent-uuid-dedup", []int64{tag1.ID, tag2.ID})
+	if err := store.SetAgentTags(context.Background(), "agent-uuid-dedup", []int64{tag1.ID, tag2.ID}); err != nil {
+		t.Fatalf("Failed to set agent tags: %v", err)
+	}
 
 	// Assign same module to both tags
-	store.AssignModule(context.Background(), "sharedMod", nil, &tag1.ID)
-	store.AssignModule(context.Background(), "sharedMod", nil, &tag2.ID)
+	if err := store.AssignModule(context.Background(), "sharedMod", nil, &tag1.ID); err != nil {
+		t.Fatalf("Failed to assign sharedMod to tag1: %v", err)
+	}
+	if err := store.AssignModule(context.Background(), "sharedMod", nil, &tag2.ID); err != nil {
+		t.Fatalf("Failed to assign sharedMod to tag2: %v", err)
+	}
 
 	// Make checkin request
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
@@ -620,6 +635,31 @@ func TestReportInvalidStatus(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestCheckinMethodNotAllowed tests that GET /api/checkin returns 405 (method not allowed)
+func TestCheckinMethodNotAllowed(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	// Create a full server mux with the same route registrations as the real server
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/checkin", s.handleCheckin)
+	mux.HandleFunc("POST /api/report", s.handleReport)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Send a GET request to /api/checkin
+	resp, err := http.Get(ts.URL + "/api/checkin")
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Assert 405 Method Not Allowed
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status 405, got %d", resp.StatusCode)
 	}
 }
 
