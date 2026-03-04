@@ -72,7 +72,55 @@ function Dashboard() {
 }
 
 function AgentDetail({ id }) {
-    return html`<div class="container"><p>Agent detail placeholder for ID: ${id}</p></div>`;
+    const [data, setData] = useState(null);
+    const [error, setError] = useState(null);
+    const [expanded, setExpanded] = useState({});
+
+    useEffect(() => {
+        fetchJSON(`/api/agents/${id}`)
+            .then(setData)
+            .catch(e => setError(e.message));
+    }, [id]);
+
+    const toggleExpand = (name) => {
+        setExpanded(prev => ({ ...prev, [name]: !prev[name] }));
+    };
+
+    if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
+    if (!data) return html`<div class="container"><p>Loading...</p></div>`;
+
+    const { agent, tags, module_results } = data;
+
+    return html`
+        <div class="container">
+            <p><a href="#/">← Dashboard</a></p>
+            <h2>${agent.hostname}</h2>
+
+            <dl class="agent-info">
+                <dt>Remote IP</dt><dd>${agent.remote_ip}</dd>
+                <dt>OS / Arch</dt><dd>${agent.os} / ${agent.arch}</dd>
+                <dt>Distro</dt><dd>${agent.distro}</dd>
+                <dt>Last Seen</dt><dd>${new Date(agent.last_seen_at * 1000).toLocaleString()}</dd>
+                <dt>Tags</dt><dd>${tags.length > 0 ? tags.map(t => html`<span class="tag">${t.name}</span>`) : 'None'}</dd>
+            </dl>
+
+            <h3>Modules</h3>
+            ${module_results.map(mr => html`
+                <div class="module-result">
+                    <div class="module-result-header" onClick=${() => toggleExpand(mr.module_name)}>
+                        <span>${mr.module_name}</span>
+                        <span class="badge badge-${mr.status}">${mr.status}</span>
+                    </div>
+                    ${expanded[mr.module_name] && html`
+                        <div class="module-output">
+                            ${mr.stdout && html`<div><strong>stdout:</strong><pre>${mr.stdout}</pre></div>`}
+                            ${mr.stderr && html`<div><strong>stderr:</strong><pre>${mr.stderr}</pre></div>`}
+                        </div>
+                    `}
+                </div>
+            `)}
+        </div>
+    `;
 }
 
 // --- App Shell ---
