@@ -49,6 +49,9 @@ type ReportResponse struct {
 // handleCheckin handles POST /api/checkin requests.
 // Implemented in Task 3.
 func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
+	// Limit request body to 1 MB to prevent OOM from oversized requests.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	// Decode JSON request body
 	var req CheckinRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -125,6 +128,9 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 // handleReport handles POST /api/report requests.
 // Implemented in Task 4.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	// Limit request body to 1 MB to prevent OOM from oversized requests.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	// Decode JSON request body
 	var req ReportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

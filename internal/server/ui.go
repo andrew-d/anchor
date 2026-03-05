@@ -325,6 +325,7 @@ func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req CreateTagRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -394,6 +395,7 @@ func (s *Server) handleSetAgentTags(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	agentID := r.PathValue("id")
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SetAgentTagsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -427,6 +429,7 @@ func (s *Server) handleSetAgentDisplayName(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	agentID := r.PathValue("id")
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SetDisplayNameRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -508,6 +511,7 @@ func (s *Server) handleListAssignments(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req CreateAssignmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
