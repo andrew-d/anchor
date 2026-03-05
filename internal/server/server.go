@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/andrew-d/anchor/internal/db"
 	"github.com/andrew-d/anchor/internal/module"
@@ -32,8 +35,8 @@ func New(port int, modulesDir string, dataDir string) *Server {
 	}
 }
 
-// Run starts the HTTP server and blocks until it returns an error.
-func (s *Server) Run() error {
+// Run starts the HTTP server and blocks until the context is cancelled or it returns an error.
+func (s *Server) Run(ctx context.Context) error {
 	// Open the SQLite database
 	dbPath := filepath.Join(s.dataDir, "anchor.db")
 	store, err := db.Open(dbPath)
@@ -85,5 +88,24 @@ func (s *Server) Run() error {
 
 	addr := fmt.Sprintf(":%d", s.port)
 	slog.Info("starting server", "addr", addr, "modules_dir", s.modulesDir, "data_dir", s.dataDir)
-	return http.ListenAndServe(addr, mux)
+
+	httpServer := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	// Shut down gracefully when context is cancelled
+	go func() {
+		<-ctx.Done()
+		slog.Info("server shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		httpServer.Shutdown(shutdownCtx)
+	}()
+
+	err = httpServer.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

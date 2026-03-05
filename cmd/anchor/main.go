@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/andrew-d/anchor/internal/agent"
 	"github.com/andrew-d/anchor/internal/server"
@@ -38,8 +40,11 @@ func runServer(args []string) int {
 		return 1
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	srv := server.New(*port, *modulesDir, *dataDir)
-	if err := srv.Run(); err != nil {
+	if err := srv.Run(ctx); err != nil {
 		slog.Error("server error", "error", err)
 		return 1
 	}
@@ -55,8 +60,11 @@ func runAgent(args []string) int {
 		return 1
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	a := agent.New(*serverURL, *dataDir)
-	if err := a.Run(context.Background()); err != nil {
+	if err := a.Run(ctx); err != nil {
 		slog.Error("agent error", "error", err)
 		return 1
 	}
