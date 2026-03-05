@@ -317,16 +317,16 @@ VALUES (?, ?, ?, ?, ?, ?)
 // GetLatestModuleResults returns the most recent result for each module for an agent.
 func (s *SQLiteStore) GetLatestModuleResults(ctx context.Context, agentID string) ([]ModuleResult, error) {
 	query := `
-SELECT mr.id, mr.agent_id, mr.module_name, mr.status, mr.stdout, mr.stderr, mr.executed_at FROM module_results mr
-INNER JOIN (
-    SELECT agent_id, module_name, MAX(executed_at) as max_ts
-    FROM module_results
-    WHERE agent_id = ?
-    GROUP BY agent_id, module_name
-) latest ON mr.agent_id = latest.agent_id
-    AND mr.module_name = latest.module_name
-    AND mr.executed_at = latest.max_ts
-ORDER BY mr.module_name
+SELECT id, agent_id, module_name, status, stdout, stderr, executed_at
+FROM module_results mr
+WHERE agent_id = ?
+  AND id = (
+    SELECT id FROM module_results
+    WHERE agent_id = mr.agent_id AND module_name = mr.module_name
+    ORDER BY executed_at DESC, id DESC
+    LIMIT 1
+  )
+ORDER BY module_name
 `
 	rows, err := s.db.QueryContext(ctx, query, agentID)
 	if err != nil {

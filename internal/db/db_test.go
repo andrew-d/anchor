@@ -661,6 +661,50 @@ func TestGetLatestModuleResults(t *testing.T) {
 	}
 }
 
+func TestGetLatestModuleResults_DuplicateTimestamp(t *testing.T) {
+	// When two results for the same agent+module have identical executed_at,
+	// GetLatestModuleResults must still return exactly one row per module.
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Insert two results for mod_a with the same timestamp
+	if err := store.InsertModuleResult(ctx, ModuleResult{
+		AgentID:    agent.ID,
+		ModuleName: "mod_a",
+		Status:     "ok",
+		Stdout:     "first",
+		ExecutedAt: 5000,
+	}); err != nil {
+		t.Fatalf("InsertModuleResult failed: %v", err)
+	}
+
+	if err := store.InsertModuleResult(ctx, ModuleResult{
+		AgentID:    agent.ID,
+		ModuleName: "mod_a",
+		Status:     "changed",
+		Stdout:     "second",
+		ExecutedAt: 5000,
+	}); err != nil {
+		t.Fatalf("InsertModuleResult failed: %v", err)
+	}
+
+	latest, err := store.GetLatestModuleResults(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetLatestModuleResults failed: %v", err)
+	}
+
+	if len(latest) != 1 {
+		t.Fatalf("Expected 1 latest result, got %d", len(latest))
+	}
+}
+
 func TestGetModuleHistory_DescendingOrder(t *testing.T) {
 	// AC5.3: Full history is queryable in descending executed_at order
 	store := newTestStore(t)
