@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/andrew-d/anchor/internal/sysinfo"
 )
 
 // Agent is the anchor agent that checks in with the server.
@@ -93,7 +95,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	slog.Debug("agent UUID", "id", agentID)
 
 	// Gather system info
-	sysInfo := gatherSystemInfo()
+	sysInfo := sysinfo.GatherSystemInfo()
 	slog.Debug("gathered system info", "hostname", sysInfo.Hostname, "os", sysInfo.OS, "arch", sysInfo.Arch, "distro", sysInfo.Distro)
 
 	// Polling loop

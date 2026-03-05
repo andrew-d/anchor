@@ -1,6 +1,6 @@
 //go:build darwin
 
-package agent
+package sysinfo
 
 import (
 	"os"
@@ -8,8 +8,8 @@ import (
 	"runtime"
 )
 
-// gatherSystemInfo gathers system information on macOS (darwin).
-func gatherSystemInfo() SystemInfo {
+// GatherSystemInfo gathers system information on macOS (darwin).
+func GatherSystemInfo() SystemInfo {
 	hostname, _ := os.Hostname()
 	out, _ := exec.Command("sw_vers").Output()
 	return SystemInfo{
