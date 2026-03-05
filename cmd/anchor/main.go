@@ -76,6 +76,18 @@ func runAgent(args []string) int {
 	defer stop()
 
 	a := agent.New(*serverURL, *dataDir)
+
+	// SIGHUP triggers an immediate checkin cycle
+	sighup := make(chan os.Signal, 1)
+	signal.Notify(sighup, syscall.SIGHUP)
+	go func() {
+		for range sighup {
+			slog.Info("received SIGHUP, triggering immediate run")
+			a.TriggerRun()
+		}
+	}()
+	defer signal.Stop(sighup)
+
 	if err := a.Run(ctx); err != nil {
 		slog.Error("agent error", "error", err)
 		return 1

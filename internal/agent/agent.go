@@ -24,6 +24,10 @@ type Agent struct {
 	dataDir    string
 	retryDelay time.Duration
 	httpClient *http.Client
+
+	// reload is signalled to interrupt a poll sleep and trigger an
+	// immediate checkin cycle (e.g. on SIGHUP).
+	reload chan struct{}
 }
 
 // New creates a new Agent.
@@ -33,6 +37,7 @@ func New(serverURL string, dataDir string) *Agent {
 		dataDir:    dataDir,
 		retryDelay: retryDelay,
 		httpClient: http.DefaultClient,
+		reload:     make(chan struct{}, 1),
 	}
 }
 
@@ -84,6 +89,31 @@ func sleep(ctx context.Context, d time.Duration) bool {
 }
 
 const retryDelay = 5 * time.Second
+
+// pollSleep waits for the given duration, returning early if the context is
+// cancelled or the reload channel is signalled. Returns false only when the
+// context is cancelled (meaning the agent should shut down).
+func (a *Agent) pollSleep(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-a.reload:
+		slog.Info("reload signal received, running immediately")
+		return true
+	case <-time.After(d):
+		return true
+	}
+}
+
+// TriggerRun interrupts the current poll sleep and causes the agent to
+// perform an immediate checkin/execute cycle. Safe to call from any goroutine.
+// If a trigger is already pending, the call is a no-op.
+func (a *Agent) TriggerRun() {
+	select {
+	case a.reload <- struct{}{}:
+	default:
+	}
+}
 
 // Run performs the agent polling loop, checking in with the server, executing modules, and reporting results.
 // It accepts a context for cancellation (allows clean shutdown and testability).
@@ -225,7 +255,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			pollInterval = 60 // default to 60 seconds if not set
 		}
 		slog.Debug("sleeping before next poll", "interval_seconds", pollInterval)
-		if !sleep(ctx, time.Duration(pollInterval)*time.Second) {
+		if !a.pollSleep(ctx, time.Duration(pollInterval)*time.Second) {
 			break
 		}
 	}
