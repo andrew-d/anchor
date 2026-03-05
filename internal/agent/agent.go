@@ -23,6 +23,7 @@ type Agent struct {
 	serverURL  string
 	dataDir    string
 	retryDelay time.Duration
+	httpClient *http.Client
 }
 
 // New creates a new Agent.
@@ -31,6 +32,7 @@ func New(serverURL string, dataDir string) *Agent {
 		serverURL:  serverURL,
 		dataDir:    dataDir,
 		retryDelay: retryDelay,
+		httpClient: http.DefaultClient,
 	}
 }
 
@@ -122,7 +124,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 
-		resp, err := http.Post(checkinURL, "application/json", bytes.NewReader(reqBody))
+		resp, err := a.httpClient.Post(checkinURL, "application/json", bytes.NewReader(reqBody))
 		if err != nil {
 			slog.Error("checkin request failed", "error", err, "url", checkinURL)
 			if !sleep(ctx, a.retryDelay) {
@@ -191,7 +193,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				break
 			}
 
-			reportResp, err := http.Post(reportURL, "application/json", bytes.NewReader(reportBody))
+			reportResp, err := a.httpClient.Post(reportURL, "application/json", bytes.NewReader(reportBody))
 			if err != nil {
 				slog.Error("report request failed", "error", err, "url", reportURL, "module", mod.Name)
 				reportFailed = true

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/andrew-d/anchor/internal/db"
@@ -139,52 +140,48 @@ func TestCheckinNewAgent(t *testing.T) {
 
 // TestCheckinUpdateAgent tests AC1.2: Subsequent check-ins update system info and last_seen_at
 func TestCheckinUpdateAgent(t *testing.T) {
-	s, store, _ := newTestServer(t)
+	synctest.Test(t, func(t *testing.T) {
+		s, store, _ := newTestServer(t)
 
-	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
-	defer ts.Close()
+		// First check-in
+		reqBody1 := CheckinRequest{
+			ID:       "agent-uuid-456",
+			Hostname: "web-server-1",
+			OS:       "linux",
+			Arch:     "amd64",
+			Distro:   "ubuntu-22.04",
+		}
+		reqJSON1, _ := json.Marshal(reqBody1)
+		req1 := httptest.NewRequest("POST", "/api/checkin", bytes.NewReader(reqJSON1))
+		req1.Header.Set("Content-Type", "application/json")
+		rec1 := httptest.NewRecorder()
+		s.handleCheckin(rec1, req1)
+		if rec1.Code != http.StatusOK {
+			t.Fatalf("First checkin failed: status %d", rec1.Code)
+		}
 
-	// First check-in
-	reqBody1 := CheckinRequest{
-		ID:       "agent-uuid-456",
-		Hostname: "web-server-1",
-		OS:       "linux",
-		Arch:     "amd64",
-		Distro:   "ubuntu-22.04",
-	}
-	reqJSON1, _ := json.Marshal(reqBody1)
-	resp1, err := http.Post(ts.URL, "application/json", bytes.NewReader(reqJSON1))
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	resp1.Body.Close()
+		agent1, _ := store.GetAgent(context.Background(), "agent-uuid-456")
+		lastSeenAt1 := agent1.LastSeenAt
 
-	agent1, _ := store.GetAgent(context.Background(), "agent-uuid-456")
-	lastSeenAt1 := agent1.LastSeenAt
+		// Advance fake clock past the Unix-second boundary
+		time.Sleep(1 * time.Second)
 
-	// Wait a moment to ensure timestamp differs (Unix timestamps are in seconds)
-	time.Sleep(1100 * time.Millisecond)
+		// Second check-in with same UUID
+		reqJSON2, _ := json.Marshal(reqBody1)
+		req2 := httptest.NewRequest("POST", "/api/checkin", bytes.NewReader(reqJSON2))
+		req2.Header.Set("Content-Type", "application/json")
+		rec2 := httptest.NewRecorder()
+		s.handleCheckin(rec2, req2)
+		if rec2.Code != http.StatusOK {
+			t.Fatalf("Second checkin failed: status %d", rec2.Code)
+		}
 
-	// Second check-in with same UUID
-	reqBody2 := CheckinRequest{
-		ID:       "agent-uuid-456",
-		Hostname: "web-server-1",
-		OS:       "linux",
-		Arch:     "amd64",
-		Distro:   "ubuntu-22.04",
-	}
-	reqJSON2, _ := json.Marshal(reqBody2)
-	resp2, err := http.Post(ts.URL, "application/json", bytes.NewReader(reqJSON2))
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	resp2.Body.Close()
+		agent2, _ := store.GetAgent(context.Background(), "agent-uuid-456")
 
-	agent2, _ := store.GetAgent(context.Background(), "agent-uuid-456")
-
-	if agent2.LastSeenAt <= lastSeenAt1 {
-		t.Errorf("LastSeenAt should be updated: old=%d, new=%d", lastSeenAt1, agent2.LastSeenAt)
-	}
+		if agent2.LastSeenAt <= lastSeenAt1 {
+			t.Errorf("LastSeenAt should be updated: old=%d, new=%d", lastSeenAt1, agent2.LastSeenAt)
+		}
+	})
 }
 
 // TestCheckinChangedHostname tests AC1.3: Agent with changed hostname updates correctly
@@ -352,61 +349,64 @@ func TestReport(t *testing.T) {
 
 // TestReportMultipleResults tests AC5.1: Every module execution inserts a new row (no upsert)
 func TestReportMultipleResults(t *testing.T) {
-	s, store, _ := newTestServer(t)
+	synctest.Test(t, func(t *testing.T) {
+		s, store, _ := newTestServer(t)
 
-	// First create the agent in the database
-	agent := db.Agent{
-		ID:       "agent-uuid-multi",
-		Hostname: "test-host",
-		OS:       "linux",
-		Arch:     "amd64",
-		Distro:   "ubuntu-22.04",
-	}
-	if err := store.UpsertAgent(context.Background(), agent); err != nil {
-		t.Fatalf("Failed to create agent: %v", err)
-	}
+		// First create the agent in the database
+		agent := db.Agent{
+			ID:       "agent-uuid-multi",
+			Hostname: "test-host",
+			OS:       "linux",
+			Arch:     "amd64",
+			Distro:   "ubuntu-22.04",
+		}
+		if err := store.UpsertAgent(context.Background(), agent); err != nil {
+			t.Fatalf("Failed to create agent: %v", err)
+		}
 
-	ts := httptest.NewServer(http.HandlerFunc(s.handleReport))
-	defer ts.Close()
+		// Report same module twice
+		reqBody1 := ReportRequest{
+			AgentID:    "agent-uuid-multi",
+			ModuleName: "test_module",
+			Status:     "ok",
+			Stdout:     "first run",
+			Stderr:     "",
+			ExecutedAt: time.Now().Unix(),
+		}
+		reqJSON1, _ := json.Marshal(reqBody1)
+		req1 := httptest.NewRequest("POST", "/api/report", bytes.NewReader(reqJSON1))
+		req1.Header.Set("Content-Type", "application/json")
+		rec1 := httptest.NewRecorder()
+		s.handleReport(rec1, req1)
+		if rec1.Code != http.StatusOK {
+			t.Fatalf("First report failed: status %d", rec1.Code)
+		}
 
-	// Report same module twice
-	reqBody1 := ReportRequest{
-		AgentID:    "agent-uuid-multi",
-		ModuleName: "test_module",
-		Status:     "ok",
-		Stdout:     "first run",
-		Stderr:     "",
-		ExecutedAt: time.Now().Unix(),
-	}
-	reqJSON1, _ := json.Marshal(reqBody1)
-	resp1, err := http.Post(ts.URL, "application/json", bytes.NewReader(reqJSON1))
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	resp1.Body.Close()
+		time.Sleep(10 * time.Millisecond)
 
-	time.Sleep(10 * time.Millisecond)
+		reqBody2 := ReportRequest{
+			AgentID:    "agent-uuid-multi",
+			ModuleName: "test_module",
+			Status:     "changed",
+			Stdout:     "second run",
+			Stderr:     "",
+			ExecutedAt: time.Now().Unix(),
+		}
+		reqJSON2, _ := json.Marshal(reqBody2)
+		req2 := httptest.NewRequest("POST", "/api/report", bytes.NewReader(reqJSON2))
+		req2.Header.Set("Content-Type", "application/json")
+		rec2 := httptest.NewRecorder()
+		s.handleReport(rec2, req2)
+		if rec2.Code != http.StatusOK {
+			t.Fatalf("Second report failed: status %d", rec2.Code)
+		}
 
-	reqBody2 := ReportRequest{
-		AgentID:    "agent-uuid-multi",
-		ModuleName: "test_module",
-		Status:     "changed",
-		Stdout:     "second run",
-		Stderr:     "",
-		ExecutedAt: time.Now().Unix(),
-	}
-	reqJSON2, _ := json.Marshal(reqBody2)
-	resp2, err := http.Post(ts.URL, "application/json", bytes.NewReader(reqJSON2))
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
-	}
-	resp2.Body.Close()
-
-	// Verify both results exist
-	history, _ := store.GetModuleHistory(context.Background(), "agent-uuid-multi", "test_module")
-	if len(history) != 2 {
-		t.Errorf("Expected 2 results, got %d", len(history))
-	}
+		// Verify both results exist
+		history, _ := store.GetModuleHistory(context.Background(), "agent-uuid-multi", "test_module")
+		if len(history) != 2 {
+			t.Errorf("Expected 2 results, got %d", len(history))
+		}
+	})
 }
 
 // TestCheckinWithDirectAndTagModules tests AC3.4: Agent's effective module set is union of direct + tag-inherited assignments
