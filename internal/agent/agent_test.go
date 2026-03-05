@@ -151,6 +151,7 @@ func TestAgentPollingLoop_CheckinServerError(t *testing.T) {
 	defer server.Close()
 
 	agent := New(server.URL, dataDir)
+	agent.retryDelay = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

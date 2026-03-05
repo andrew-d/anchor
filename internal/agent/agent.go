@@ -20,15 +20,17 @@ import (
 
 // Agent is the anchor agent that checks in with the server.
 type Agent struct {
-	serverURL string
-	dataDir   string
+	serverURL  string
+	dataDir    string
+	retryDelay time.Duration
 }
 
 // New creates a new Agent.
 func New(serverURL string, dataDir string) *Agent {
 	return &Agent{
-		serverURL: serverURL,
-		dataDir:   dataDir,
+		serverURL:  serverURL,
+		dataDir:    dataDir,
+		retryDelay: retryDelay,
 	}
 }
 
@@ -114,7 +116,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		reqBody, err := json.Marshal(checkinReq)
 		if err != nil {
 			slog.Error("failed to marshal checkin request", "error", err)
-			if !sleep(ctx, retryDelay) {
+			if !sleep(ctx, a.retryDelay) {
 				break
 			}
 			continue
@@ -123,7 +125,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		resp, err := http.Post(checkinURL, "application/json", bytes.NewReader(reqBody))
 		if err != nil {
 			slog.Error("checkin request failed", "error", err, "url", checkinURL)
-			if !sleep(ctx, retryDelay) {
+			if !sleep(ctx, a.retryDelay) {
 				break
 			}
 			continue
@@ -134,7 +136,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			slog.Error("checkin returned non-OK status", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
-			if !sleep(ctx, retryDelay) {
+			if !sleep(ctx, a.retryDelay) {
 				break
 			}
 			continue
@@ -145,7 +147,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err := json.NewDecoder(resp.Body).Decode(&checkinResp); err != nil {
 			resp.Body.Close()
 			slog.Error("failed to decode checkin response", "error", err)
-			if !sleep(ctx, retryDelay) {
+			if !sleep(ctx, a.retryDelay) {
 				break
 			}
 			continue
@@ -209,7 +211,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 		if reportFailed {
 			slog.Error("report failed, stopping module execution")
-			if !sleep(ctx, retryDelay) {
+			if !sleep(ctx, a.retryDelay) {
 				break
 			}
 			continue
