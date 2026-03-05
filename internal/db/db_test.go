@@ -1118,7 +1118,11 @@ func TestConcurrentUpsertAgents(t *testing.T) {
 }
 
 // Helper function to create a test store with a temporary database.
+// Marks the test as parallel since each store is fully isolated.
 func newTestStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	t.Parallel()
+
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
