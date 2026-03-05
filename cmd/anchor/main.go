@@ -11,6 +11,7 @@ import (
 
 	"github.com/andrew-d/anchor/internal/agent"
 	"github.com/andrew-d/anchor/internal/server"
+	"github.com/andrew-d/anchor/internal/version"
 )
 
 const usage = `Usage: anchor <command> [flags]
@@ -18,6 +19,7 @@ const usage = `Usage: anchor <command> [flags]
 Commands:
   server    Start the anchor server
   agent     Start the anchor agent
+  version   Print the anchor version
 
 Run 'anchor <command> -help' for details on a specific command.
 `
@@ -33,6 +35,9 @@ func main() {
 		os.Exit(runServer(os.Args[2:]))
 	case "agent":
 		os.Exit(runAgent(os.Args[2:]))
+	case "version", "-version", "--version", "-v":
+		fmt.Println("anchor", version.Long())
+		os.Exit(0)
 	case "-help", "--help", "-h", "help":
 		fmt.Print(usage)
 		os.Exit(0)
