@@ -35,9 +35,10 @@ type Metadata struct {
 
 // Loader reads module scripts from a directory and caches their metadata.
 type Loader struct {
-	dir   string
-	mu    sync.Mutex
-	cache map[string]*Module // keyed by filename
+	dir    string
+	loadMu sync.Mutex         // serializes LoadAll calls so concurrent loads don't race
+	mu     sync.Mutex         // protects cache reads/writes
+	cache  map[string]*Module // keyed by filename
 }
 
 // NewLoader creates a Loader that reads from the given directory.
@@ -51,9 +52,19 @@ func NewLoader(dir string) *Loader {
 // LoadAll reads all module scripts from the loader's directory, hashing them
 // and comparing against cached entries. Only files with changed hashes or new
 // files are re-parsed for metadata.
+//
+// File I/O and metadata command execution happen outside the lock; only the
+// final cache swap is synchronized.
 func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
+	// Serialize loads so two concurrent callers don't race on the cache.
+	l.loadMu.Lock()
+	defer l.loadMu.Unlock()
+
+	// Snapshot the current cache so we can compare hashes without holding
+	// mu during I/O.
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	oldCache := l.cache
+	l.mu.Unlock()
 
 	// Read all files from the directory
 	entries, err := os.ReadDir(l.dir)
@@ -61,7 +72,8 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 		return nil, fmt.Errorf("reading module directory: %w", err)
 	}
 
-	// Build a new cache with modules from the current state of the directory
+	// Build a new cache with modules from the current state of the directory.
+	// All file reads and metadata execution happen here, outside the lock.
 	newCache := make(map[string]*Module)
 
 	for _, entry := range entries {
@@ -85,12 +97,12 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 		hashHex := hex.EncodeToString(hash[:])
 
 		// Check if this file is already cached with the same hash
-		if cached, exists := l.cache[filename]; exists && cached.hash == hashHex {
+		if cached, exists := oldCache[filename]; exists && cached.hash == hashHex {
 			// Reuse cached module (AC4.5 - unchanged files)
 			newCache[filename] = cached
 		} else {
 			// Hash differs or file is new - parse metadata
-			module, err := l.parseModule(ctx, filename, string(contents), hashHex)
+			module, err := parseModule(ctx, filename, string(contents), hashHex)
 			if err != nil {
 				slog.Warn("failed to parse module metadata", "file", filename, "error", err)
 				continue
@@ -99,8 +111,10 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 		}
 	}
 
-	// Replace old cache with new cache (files not in directory are dropped - AC4.4)
+	// Atomically swap the cache (files not in directory are dropped - AC4.4)
+	l.mu.Lock()
 	l.cache = newCache
+	l.mu.Unlock()
 
 	// Return sorted slice of all modules for deterministic order
 	modules := make([]Module, 0, len(newCache))
@@ -116,7 +130,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 
 // parseModule executes the module script with the "metadata" argument to extract
 // metadata, then returns a new Module struct.
-func (l *Loader) parseModule(ctx context.Context, filename, scriptContent, hashHex string) (*Module, error) {
+func parseModule(ctx context.Context, filename, scriptContent, hashHex string) (*Module, error) {
 	// Write script to a temporary file
 	tmpFile, err := os.CreateTemp("", "anchor-module-*")
 	if err != nil {
