@@ -83,6 +83,7 @@ esac
 
 // TestCheckinNewAgent tests AC1.1: First check-in from a new UUID creates agent record
 func TestCheckinNewAgent(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create test HTTP server
@@ -140,6 +141,7 @@ func TestCheckinNewAgent(t *testing.T) {
 
 // TestCheckinUpdateAgent tests AC1.2: Subsequent check-ins update system info and last_seen_at
 func TestCheckinUpdateAgent(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		s, store, _ := newTestServer(t)
 
@@ -186,6 +188,7 @@ func TestCheckinUpdateAgent(t *testing.T) {
 
 // TestCheckinChangedHostname tests AC1.3: Agent with changed hostname updates correctly
 func TestCheckinChangedHostname(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
@@ -234,6 +237,7 @@ func TestCheckinChangedHostname(t *testing.T) {
 
 // TestCheckinWithModules tests AC2.1: Checkin response contains full script content for assigned modules
 func TestCheckinWithModules(t *testing.T) {
+	t.Parallel()
 	s, store, loader := newTestServer(t)
 
 	// Create a test module
@@ -298,6 +302,7 @@ func TestCheckinWithModules(t *testing.T) {
 
 // TestReport tests AC2.4: Agent reports each module result via POST /api/report
 func TestReport(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// First create the agent in the database
@@ -349,6 +354,7 @@ func TestReport(t *testing.T) {
 
 // TestReportMultipleResults tests AC5.1: Every module execution inserts a new row (no upsert)
 func TestReportMultipleResults(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		s, store, _ := newTestServer(t)
 
@@ -411,6 +417,7 @@ func TestReportMultipleResults(t *testing.T) {
 
 // TestCheckinWithDirectAndTagModules tests AC3.4: Agent's effective module set is union of direct + tag-inherited assignments
 func TestCheckinWithDirectAndTagModules(t *testing.T) {
+	t.Parallel()
 	s, store, loader := newTestServer(t)
 
 	// Create two test modules
@@ -494,6 +501,7 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 
 // TestCheckinDeduplicateTagModules tests AC3.5: Module assigned to two tags both on same agent appears only once
 func TestCheckinDeduplicateTagModules(t *testing.T) {
+	t.Parallel()
 	s, store, loader := newTestServer(t)
 
 	// Create test module
@@ -575,6 +583,7 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 
 // TestCheckinEmptyBody tests that POST checkin with empty body returns 400
 func TestCheckinEmptyBody(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
@@ -593,6 +602,7 @@ func TestCheckinEmptyBody(t *testing.T) {
 
 // TestCheckinMissingID tests that POST checkin with missing ID returns 400
 func TestCheckinMissingID(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
@@ -618,6 +628,7 @@ func TestCheckinMissingID(t *testing.T) {
 
 // TestReportInvalidStatus tests that POST report with invalid status returns 400
 func TestReportInvalidStatus(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	ts := httptest.NewServer(http.HandlerFunc(s.handleReport))
@@ -645,6 +656,7 @@ func TestReportInvalidStatus(t *testing.T) {
 
 // TestCheckinMethodNotAllowed tests that GET /api/checkin returns 405 (method not allowed)
 func TestCheckinMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	// Create a full server mux with the same route registrations as the real server

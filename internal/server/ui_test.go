@@ -18,6 +18,7 @@ import (
 // TestListAgentsHealthyStatus tests AC7.3: agent with recent check-in and
 // module results with status "ok" or "changed" appears as "healthy".
 func TestListAgentsHealthyStatus(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create agent with recent check-in
@@ -96,6 +97,7 @@ func TestListAgentsHealthyStatus(t *testing.T) {
 // TestListAgentsUnhealthyStatus tests AC7.1: agent with recent check-in and
 // module result with status "error" appears as "unhealthy".
 func TestListAgentsUnhealthyStatus(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create agent with recent check-in
@@ -159,6 +161,7 @@ func TestListAgentsUnhealthyStatus(t *testing.T) {
 // TestListAgentsStaleStatus tests AC7.2: agent not seen within 2x poll interval
 // appears as "stale".
 func TestListAgentsStaleStatus(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create agent with old check-in (older than 2x poll interval)
@@ -207,6 +210,7 @@ func TestListAgentsStaleStatus(t *testing.T) {
 // TestListAgentsHealthyNoModules tests agent with no module results and
 // recent check-in is "healthy".
 func TestListAgentsHealthyNoModules(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create agent with recent check-in and no module results
@@ -257,6 +261,7 @@ func TestListAgentsHealthyNoModules(t *testing.T) {
 // TestGetAgentDetail tests GET /api/agents/{id} returns correct agent detail
 // with tags and module results.
 func TestGetAgentDetail(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create agent
@@ -349,6 +354,7 @@ func TestGetAgentDetail(t *testing.T) {
 
 // TestGetAgentNotFound tests GET /api/agents/{nonexistent} returns 404.
 func TestGetAgentNotFound(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	// Use httptest with a real mux to test path params
@@ -371,6 +377,7 @@ func TestGetAgentNotFound(t *testing.T) {
 
 // TestListAgentsResponse tests that the list response includes poll_interval_seconds.
 func TestListAgentsResponse(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	// Create a simple agent
@@ -411,6 +418,7 @@ func TestListAgentsResponse(t *testing.T) {
 
 // TestListAgentsMultipleStatus tests that agents are correctly grouped by health status.
 func TestListAgentsMultipleStatus(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	now := time.Now().Unix()
@@ -510,6 +518,7 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 
 // TestCreateTag tests AC3.1: POST /api/tags creates a tag and GET /api/tags lists it.
 func TestCreateTag(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	mux := http.NewServeMux()
@@ -571,6 +580,7 @@ func TestCreateTag(t *testing.T) {
 
 // TestDeleteTag tests DELETE /api/tags/{id} removes a tag.
 func TestDeleteTag(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -613,6 +623,7 @@ func TestDeleteTag(t *testing.T) {
 
 // TestSetAgentTags tests PUT /api/agents/{id}/tags assigns tags to an agent.
 func TestSetAgentTags(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -683,6 +694,7 @@ func TestSetAgentTags(t *testing.T) {
 
 // TestListAssignments tests GET /api/assignments lists all module assignments.
 func TestListAssignments(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -745,6 +757,7 @@ func TestListAssignments(t *testing.T) {
 
 // TestCreateAssignmentWithAgentID tests POST /api/assignments creates direct agent assignment (AC3.2).
 func TestCreateAssignmentWithAgentID(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -832,6 +845,7 @@ func TestCreateAssignmentWithAgentID(t *testing.T) {
 
 // TestCreateAssignmentWithTagID tests POST /api/assignments creates tag assignment (AC3.3).
 func TestCreateAssignmentWithTagID(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -919,6 +933,7 @@ func TestCreateAssignmentWithTagID(t *testing.T) {
 
 // TestCreateAssignmentBothAgentAndTag tests POST /api/assignments with both agent_id and tag_id returns 400.
 func TestCreateAssignmentBothAgentAndTag(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	mux := http.NewServeMux()
@@ -952,6 +967,7 @@ func TestCreateAssignmentBothAgentAndTag(t *testing.T) {
 
 // TestDeleteAssignment tests DELETE /api/assignments/{id} removes an assignment.
 func TestDeleteAssignment(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -1013,6 +1029,7 @@ func TestDeleteAssignment(t *testing.T) {
 
 // TestListModules tests GET /api/modules returns loaded modules with metadata (AC9.5).
 func TestListModules(t *testing.T) {
+	t.Parallel()
 	s, _, _ := newTestServer(t)
 
 	// Create a test module
@@ -1064,6 +1081,7 @@ esac
 
 // TestEffectiveModulesWithMixed tests AC9.4: effective module set shows both direct and tag-based modules.
 func TestEffectiveModulesWithMixed(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -1148,6 +1166,7 @@ func TestEffectiveModulesWithMixed(t *testing.T) {
 
 // TestSetAgentDisplayName tests PUT /api/agents/{id}/name sets the display name.
 func TestSetAgentDisplayName(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -1198,6 +1217,7 @@ func TestSetAgentDisplayName(t *testing.T) {
 
 // TestSetAgentDisplayName_Empty tests PUT /api/agents/{id}/name with empty string returns 400.
 func TestSetAgentDisplayName_Empty(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -1239,6 +1259,7 @@ func TestSetAgentDisplayName_Empty(t *testing.T) {
 
 // TestSetAgentDisplayName_Null tests PUT /api/agents/{id}/name with null resets to nil.
 func TestSetAgentDisplayName_Null(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
@@ -1294,6 +1315,7 @@ func TestSetAgentDisplayName_Null(t *testing.T) {
 
 // TestListAgentsIncludesDisplayName tests that GET /api/agents includes display_name.
 func TestListAgentsIncludesDisplayName(t *testing.T) {
+	t.Parallel()
 	s, store, _ := newTestServer(t)
 
 	ctx := context.Background()
