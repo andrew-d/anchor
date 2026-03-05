@@ -1,0 +1,13 @@
+[Unit]
+Description=Anchor Configuration Management Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/anchor agent -server http://your-server:8080
+Restart=on-failure
+RestartSec=5
+StateDirectory=anchor
+
+[Install]
+WantedBy=multi-user.target
