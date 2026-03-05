@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -624,6 +625,7 @@ type ModuleMetadataResponse struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Filename    string `json:"filename"`
+	Error       string `json:"error,omitempty"`
 }
 
 // ListModulesResponse is the response for GET /api/modules.
@@ -641,13 +643,26 @@ func (s *Server) handleListModules(w http.ResponseWriter, r *http.Request) {
 	}
 
 	moduleResponses := []ModuleMetadataResponse{}
-	for _, module := range modules {
+	for _, mod := range modules {
 		moduleResponses = append(moduleResponses, ModuleMetadataResponse{
-			Name:        module.Name,
-			Description: module.Description,
-			Filename:    module.Filename,
+			Name:        mod.Name,
+			Description: mod.Description,
+			Filename:    mod.Filename,
 		})
 	}
+
+	// Append errored modules so the UI can display them
+	for _, modErr := range s.loader.LoadErrors() {
+		moduleResponses = append(moduleResponses, ModuleMetadataResponse{
+			Filename: modErr.Filename,
+			Error:    modErr.Error,
+		})
+	}
+
+	// Sort by filename so errored modules appear in their natural position
+	slices.SortFunc(moduleResponses, func(a, b ModuleMetadataResponse) int {
+		return strings.Compare(a.Filename, b.Filename)
+	})
 
 	resp := ListModulesResponse{
 		Modules: moduleResponses,

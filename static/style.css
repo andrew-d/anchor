@@ -248,6 +248,29 @@ header a { color: white; text-decoration: none; }
     margin: 0;
 }
 
+/* Module errors */
+.module-error-banner {
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    color: #991b1b;
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.module-item-error {
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+.module-error-message {
+    color: #991b1b;
+    font-size: 0.8125rem;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    margin: 0;
+}
+
 /* Tag assignment */
 .tag-assignment-list {
     display: flex;

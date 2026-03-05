@@ -1313,6 +1313,69 @@ func TestSetAgentDisplayName_Null(t *testing.T) {
 	}
 }
 
+// TestListModulesIncludesErrors tests that GET /api/modules returns both valid
+// and errored modules, with the error field set on broken ones.
+func TestListModulesIncludesErrors(t *testing.T) {
+	t.Parallel()
+	s, _, _ := newTestServer(t)
+
+	// Create a valid module
+	validScript := `#!/bin/sh
+case "$1" in
+    metadata) echo '{"name": "Base Config", "description": "Installs base packages"}' ;;
+    apply) echo "applied"; exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(s.modulesDir, "00_base"), []byte(validScript), 0755); err != nil {
+		t.Fatalf("Failed to write valid module: %v", err)
+	}
+
+	// Create a broken module (invalid JSON output)
+	brokenScript := "#!/bin/sh\ncase \"$1\" in\n    metadata) echo 'not json' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(s.modulesDir, "99_broken"), []byte(brokenScript), 0755); err != nil {
+		t.Fatalf("Failed to write broken module: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/modules", s.handleListModules)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/modules")
+	if err != nil {
+		t.Fatalf("Failed to make request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result ListModulesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(result.Modules) != 2 {
+		t.Fatalf("Expected 2 modules (1 valid + 1 error), got %d", len(result.Modules))
+	}
+
+	// Should be sorted by filename: 00_base, 99_broken
+	if result.Modules[0].Filename != "00_base" {
+		t.Errorf("Expected first module '00_base', got '%s'", result.Modules[0].Filename)
+	}
+	if result.Modules[0].Error != "" {
+		t.Errorf("Expected no error for valid module, got '%s'", result.Modules[0].Error)
+	}
+	if result.Modules[0].Name != "Base Config" {
+		t.Errorf("Expected name 'Base Config', got '%s'", result.Modules[0].Name)
+	}
+
+	if result.Modules[1].Filename != "99_broken" {
+		t.Errorf("Expected second module '99_broken', got '%s'", result.Modules[1].Filename)
+	}
+	if result.Modules[1].Error == "" {
+		t.Error("Expected error field set for broken module")
+	}
+}
+
 // TestListAgentsIncludesDisplayName tests that GET /api/agents includes display_name.
 func TestListAgentsIncludesDisplayName(t *testing.T) {
 	t.Parallel()

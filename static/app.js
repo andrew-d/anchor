@@ -290,7 +290,7 @@ function AgentDetail({ id }) {
                 <form onSubmit=${handleAddModule}>
                     <select value=${selectedModule} onInput=${e => setSelectedModule(e.target.value)} disabled=${isAdding}>
                         <option value="">Assign a module...</option>
-                        ${allModules.map(m => html`<option value=${m.filename}>${m.name}</option>`)}
+                        ${allModules.filter(m => !m.error).map(m => html`<option value=${m.filename}>${m.name}</option>`)}
                     </select>
                     <button type="submit" disabled=${isAdding || !selectedModule}>${isAdding ? 'Adding...' : 'Assign Module'}</button>
                 </form>
@@ -466,7 +466,7 @@ function TagDetail({ id }) {
                 <form onSubmit=${handleAddModule}>
                     <select value=${selectedModule} onInput=${e => setSelectedModule(e.target.value)} disabled=${isAdding}>
                         <option value="">Select a module...</option>
-                        ${modules.map(m => html`<option value=${m.filename}>${m.name}</option>`)}
+                        ${modules.filter(m => !m.error).map(m => html`<option value=${m.filename}>${m.name}</option>`)}
                     </select>
                     <button type="submit" disabled=${isAdding || !selectedModule}>${isAdding ? 'Adding...' : 'Add Module'}</button>
                 </form>
@@ -490,15 +490,31 @@ function ModulesList() {
     if (error) return html`<div class="container"><p>Error: ${error}</p></div>`;
     if (!modules) return html`<div class="container"><p>Loading...</p></div>`;
 
+    const errorCount = modules.filter(m => m.error).length;
+
     return html`
         <div class="container">
             <p><a href="#/">← Dashboard</a></p>
             <h2>Modules</h2>
 
+            ${errorCount > 0 && html`
+                <div class="module-error-banner">
+                    ${errorCount} module${errorCount !== 1 ? 's' : ''} failed to load
+                </div>
+            `}
+
             ${modules.length === 0 && html`<p>No modules loaded.</p>`}
             ${modules.length > 0 && html`
                 <div class="module-list">
-                    ${modules.map(m => html`
+                    ${modules.map(m => m.error ? html`
+                        <div class="module-item module-item-error">
+                            <div class="module-item-header">
+                                <h4>${m.filename}</h4>
+                                <span class="badge badge-error">Error</span>
+                            </div>
+                            <p class="module-error-message">${m.error}</p>
+                        </div>
+                    ` : html`
                         <div class="module-item">
                             <div class="module-item-header">
                                 <h4>${m.name}</h4>

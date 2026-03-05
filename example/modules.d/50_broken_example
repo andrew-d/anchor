@@ -1,0 +1,16 @@
+#!/bin/sh
+# Intentionally broken module to demonstrate error surfacing in the web UI.
+# The metadata command outputs invalid JSON, causing the loader to report an error.
+case "$1" in
+    metadata)
+        echo 'this is not valid JSON!'
+        ;;
+    apply)
+        echo "this module is intentionally broken"
+        exit 1
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac

@@ -33,19 +33,27 @@ type Metadata struct {
 	Description string `json:"description"`
 }
 
+// ModuleError represents a module that failed to load.
+type ModuleError struct {
+	Filename string
+	Error    string
+}
+
 // Loader reads module scripts from a directory and caches their metadata.
 type Loader struct {
-	dir    string
-	loadMu sync.Mutex         // serializes LoadAll calls so concurrent loads don't race
-	mu     sync.Mutex         // protects cache reads/writes
-	cache  map[string]*Module // keyed by filename
+	dir      string
+	loadMu   sync.Mutex         // serializes LoadAll calls so concurrent loads don't race
+	mu       sync.Mutex         // protects cache reads/writes
+	cache    map[string]*Module // keyed by filename
+	errCache map[string]string  // keyed by filename, value is error message
 }
 
 // NewLoader creates a Loader that reads from the given directory.
 func NewLoader(dir string) *Loader {
 	return &Loader{
-		dir:   dir,
-		cache: make(map[string]*Module),
+		dir:      dir,
+		cache:    make(map[string]*Module),
+		errCache: make(map[string]string),
 	}
 }
 
@@ -75,6 +83,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 	// Build a new cache with modules from the current state of the directory.
 	// All file reads and metadata execution happen here, outside the lock.
 	newCache := make(map[string]*Module)
+	newErrCache := make(map[string]string)
 
 	for _, entry := range entries {
 		// Only process regular files, skip directories and special files
@@ -89,6 +98,7 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 		contents, err := os.ReadFile(path)
 		if err != nil {
 			slog.Warn("failed to read module file", "file", filename, "error", err)
+			newErrCache[filename] = err.Error()
 			continue
 		}
 
@@ -105,15 +115,17 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 			module, err := parseModule(ctx, filename, string(contents), hashHex)
 			if err != nil {
 				slog.Warn("failed to parse module metadata", "file", filename, "error", err)
+				newErrCache[filename] = err.Error()
 				continue
 			}
 			newCache[filename] = module
 		}
 	}
 
-	// Atomically swap the cache (files not in directory are dropped - AC4.4)
+	// Atomically swap both caches (files not in directory are dropped - AC4.4)
 	l.mu.Lock()
 	l.cache = newCache
+	l.errCache = newErrCache
 	l.mu.Unlock()
 
 	// Return sorted slice of all modules for deterministic order
@@ -190,4 +202,19 @@ func (l *Loader) GetModule(filename string) (Module, bool) {
 		return Module{}, false
 	}
 	return *cached, true
+}
+
+// LoadErrors returns a sorted list of modules that failed to load.
+func (l *Loader) LoadErrors() []ModuleError {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	errors := make([]ModuleError, 0, len(l.errCache))
+	for filename, errMsg := range l.errCache {
+		errors = append(errors, ModuleError{Filename: filename, Error: errMsg})
+	}
+	slices.SortFunc(errors, func(a, b ModuleError) int {
+		return strings.Compare(a.Filename, b.Filename)
+	})
+	return errors
 }

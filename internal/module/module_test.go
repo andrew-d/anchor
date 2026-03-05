@@ -402,3 +402,148 @@ func TestGetModuleBeforeLoad(t *testing.T) {
 		t.Error("GetModule should return false on empty cache")
 	}
 }
+
+// TestLoadErrors_TracksErrors verifies that broken modules appear in LoadErrors()
+// while valid modules still load normally.
+func TestLoadErrors_TracksErrors(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create a valid module
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// Create a broken module (invalid JSON)
+	brokenScript := "#!/bin/sh\ncase \"$1\" in\n    metadata) echo 'not json' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "99_broken"), []byte(brokenScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 valid module, got %d", len(modules))
+	}
+	if modules[0].Filename != "00_base" {
+		t.Errorf("expected valid module '00_base', got '%s'", modules[0].Filename)
+	}
+
+	errors := loader.LoadErrors()
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errors))
+	}
+	if errors[0].Filename != "99_broken" {
+		t.Errorf("expected error for '99_broken', got '%s'", errors[0].Filename)
+	}
+	if errors[0].Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestLoadErrors_ClearedOnFix verifies that fixing a broken module moves it
+// from errors to the valid module set.
+func TestLoadErrors_ClearedOnFix(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create a broken module
+	brokenScript := "#!/bin/sh\ncase \"$1\" in\n    metadata) echo 'bad' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "10_broken"), []byte(brokenScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(loader.LoadErrors()) != 1 {
+		t.Fatalf("expected 1 error before fix, got %d", len(loader.LoadErrors()))
+	}
+
+	// Fix the module
+	writeTestModule(t, dir, "10_broken", "Fixed", "Now works")
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 valid module after fix, got %d", len(modules))
+	}
+	if modules[0].Filename != "10_broken" {
+		t.Errorf("expected '10_broken', got '%s'", modules[0].Filename)
+	}
+	if len(loader.LoadErrors()) != 0 {
+		t.Errorf("expected 0 errors after fix, got %d", len(loader.LoadErrors()))
+	}
+}
+
+// TestLoadErrors_ClearedOnDelete verifies that deleting a broken module file
+// removes its error.
+func TestLoadErrors_ClearedOnDelete(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create a broken module
+	brokenScript := "#!/bin/sh\ncase \"$1\" in\n    metadata) echo 'bad' ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "10_broken"), []byte(brokenScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(loader.LoadErrors()) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(loader.LoadErrors()))
+	}
+
+	// Delete the broken file
+	if err := os.Remove(filepath.Join(dir, "10_broken")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(loader.LoadErrors()) != 0 {
+		t.Errorf("expected 0 errors after delete, got %d", len(loader.LoadErrors()))
+	}
+}
+
+// TestLoadErrors_SortedByFilename verifies that errors are returned sorted
+// by filename.
+func TestLoadErrors_SortedByFilename(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	brokenScript := "#!/bin/sh\ncase \"$1\" in\n    metadata) echo 'bad' ;;\nesac\n"
+	for _, name := range []string{"20_z_broken", "10_a_broken"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(brokenScript), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	errors := loader.LoadErrors()
+	if len(errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d", len(errors))
+	}
+	if errors[0].Filename != "10_a_broken" {
+		t.Errorf("expected first error '10_a_broken', got '%s'", errors[0].Filename)
+	}
+	if errors[1].Filename != "20_z_broken" {
+		t.Errorf("expected second error '20_z_broken', got '%s'", errors[1].Filename)
+	}
+}
