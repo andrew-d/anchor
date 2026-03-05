@@ -13,9 +13,18 @@ import (
 	"github.com/andrew-d/anchor/internal/server"
 )
 
+const usage = `Usage: anchor <command> [flags]
+
+Commands:
+  server    Start the anchor server
+  agent     Start the anchor agent
+
+Run 'anchor <command> -help' for details on a specific command.
+`
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: anchor <server|agent>\n")
+		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)
 	}
 
@@ -24,8 +33,11 @@ func main() {
 		os.Exit(runServer(os.Args[2:]))
 	case "agent":
 		os.Exit(runAgent(os.Args[2:]))
+	case "-help", "--help", "-h", "help":
+		fmt.Print(usage)
+		os.Exit(0)
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\nUsage: anchor <server|agent>\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n%s", os.Args[1], usage)
 		os.Exit(1)
 	}
 }
