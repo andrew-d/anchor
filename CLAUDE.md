@@ -1,24 +1,29 @@
-## Summary
+# Anchor
 
 anchor is a basic, homelab-friendly configuration management system: designed for simplicity and minimal operational overhead, written in Go and distributed as a single binary.
+
+## Environment
+
+- Go: `1.26.x`, specified in `go.mod`
+- Frontend: Preact + HTM, no build step, no CDN/external resources
 
 ## Development
 
 We are still developing this application. There is no need to migrate data or worry about breaking backwards compatibility.
 
-After making changes, verify with `go build ./...`, `go vet ./...`, and `go test ./... -count=1`.
+After making changes, verify with `make ci`.
 
 ## Architecture
 
 Anchor consists of two parts: a server that shows the current status and allows distributing configuration to endpoints, and a very minimal agent. Both are compiled into the same binary (`cmd/anchor/main.go` with `server` and `agent` subcommands).
 
-The server can be connected to by any agent, and stores information provided by that agent. It maintains a list of modules assigned to each agent, and has a basic Preact + HTM web UI that shows the status of each module and allows assigning modules to agents. It stores data in SQLite, and modules are read from a configuration directory (defaulting to `/etc/anchor/modules.d`).
+The server can be connected to by any agent, and stores information provided by that agent. It maintains a list of modules assigned to each agent, and has a basic web UI that shows the status of each module and allows assigning modules to agents. It stores data in SQLite, and modules are read from a configuration directory (defaulting to `/etc/anchor/modules.d`).
 
 An agent gathers very basic information about the host system (hostname, architecture, Linux distribution) and checks in with the server specified. It synchronizes configuration from the server, each of which is a single self-contained shell script. On synchronization and periodically, each script is run and the outcome is reported back to the server.
 
 ### Modules
 
-Each module is a shell script that accepts two arguments:
+Each module is a shell script that accepts a single command argument:
 - `metadata`: outputs information about the module as JSON (`{"name": "...", "description": "..."}`)
 - `apply`: applies the configuration idempotently
 
