@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -111,7 +110,7 @@ func TestCheckinNewAgent(t *testing.T) {
 	}
 
 	// Verify agent was created in store
-	agent, err := store.GetAgent(context.Background(), "agent-uuid-123")
+	agent, err := store.GetAgent(t.Context(), "agent-uuid-123")
 	if err != nil {
 		t.Fatalf("Failed to get agent: %v", err)
 	}
@@ -162,7 +161,7 @@ func TestCheckinUpdateAgent(t *testing.T) {
 			t.Fatalf("First checkin failed: status %d", rec1.Code)
 		}
 
-		agent1, _ := store.GetAgent(context.Background(), "agent-uuid-456")
+		agent1, _ := store.GetAgent(t.Context(), "agent-uuid-456")
 		lastSeenAt1 := agent1.LastSeenAt
 
 		// Advance fake clock past the Unix-second boundary
@@ -178,7 +177,7 @@ func TestCheckinUpdateAgent(t *testing.T) {
 			t.Fatalf("Second checkin failed: status %d", rec2.Code)
 		}
 
-		agent2, _ := store.GetAgent(context.Background(), "agent-uuid-456")
+		agent2, _ := store.GetAgent(t.Context(), "agent-uuid-456")
 
 		if agent2.LastSeenAt <= lastSeenAt1 {
 			t.Errorf("LastSeenAt should be updated: old=%d, new=%d", lastSeenAt1, agent2.LastSeenAt)
@@ -209,7 +208,7 @@ func TestCheckinChangedHostname(t *testing.T) {
 	}
 	resp1.Body.Close()
 
-	agent1, _ := store.GetAgent(context.Background(), "agent-uuid-789")
+	agent1, _ := store.GetAgent(t.Context(), "agent-uuid-789")
 	if agent1.Hostname != "web-server-old" {
 		t.Errorf("First hostname should be web-server-old, got %s", agent1.Hostname)
 	}
@@ -229,7 +228,7 @@ func TestCheckinChangedHostname(t *testing.T) {
 	}
 	resp2.Body.Close()
 
-	agent2, _ := store.GetAgent(context.Background(), "agent-uuid-789")
+	agent2, _ := store.GetAgent(t.Context(), "agent-uuid-789")
 	if agent2.Hostname != "web-server-new" {
 		t.Errorf("Updated hostname should be web-server-new, got %s", agent2.Hostname)
 	}
@@ -257,12 +256,12 @@ func TestCheckinWithModules(t *testing.T) {
 		Arch:     "amd64",
 		Distro:   "ubuntu-22.04",
 	}
-	if err := store.UpsertAgent(context.Background(), agent); err != nil {
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
 		t.Fatalf("Failed to create agent: %v", err)
 	}
 
 	// Assign module to agent
-	_, err := store.AssignModule(context.Background(), "test_module", stringPtr("agent-uuid-mod1"), nil)
+	_, err := store.AssignModule(t.Context(), "test_module", stringPtr("agent-uuid-mod1"), nil)
 	if err != nil {
 		t.Fatalf("Failed to assign module: %v", err)
 	}
@@ -313,7 +312,7 @@ func TestReport(t *testing.T) {
 		Arch:     "amd64",
 		Distro:   "ubuntu-22.04",
 	}
-	if err := store.UpsertAgent(context.Background(), agent); err != nil {
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
 		t.Fatalf("Failed to create agent: %v", err)
 	}
 
@@ -340,7 +339,7 @@ func TestReport(t *testing.T) {
 	}
 
 	// Verify result was stored
-	results, err := store.GetLatestModuleResults(context.Background(), "agent-uuid-report1")
+	results, err := store.GetLatestModuleResults(t.Context(), "agent-uuid-report1")
 	if err != nil {
 		t.Fatalf("Failed to get results: %v", err)
 	}
@@ -366,7 +365,7 @@ func TestReportMultipleResults(t *testing.T) {
 			Arch:     "amd64",
 			Distro:   "ubuntu-22.04",
 		}
-		if err := store.UpsertAgent(context.Background(), agent); err != nil {
+		if err := store.UpsertAgent(t.Context(), agent); err != nil {
 			t.Fatalf("Failed to create agent: %v", err)
 		}
 
@@ -408,7 +407,7 @@ func TestReportMultipleResults(t *testing.T) {
 		}
 
 		// Verify both results exist
-		history, _ := store.GetModuleHistory(context.Background(), "agent-uuid-multi", "test_module")
+		history, _ := store.GetModuleHistory(t.Context(), "agent-uuid-multi", "test_module")
 		if len(history) != 2 {
 			t.Errorf("Expected 2 results, got %d", len(history))
 		}
@@ -438,26 +437,26 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 		Arch:     "amd64",
 		Distro:   "ubuntu-22.04",
 	}
-	if err := store.UpsertAgent(context.Background(), agent); err != nil {
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
 		t.Fatalf("Failed to create agent: %v", err)
 	}
 
 	// Create a tag and assign agent to it
-	tag, err := store.CreateTag(context.Background(), "test-tag")
+	tag, err := store.CreateTag(t.Context(), "test-tag")
 	if err != nil {
 		t.Fatalf("Failed to create tag: %v", err)
 	}
 
-	if err := store.SetAgentTags(context.Background(), "agent-uuid-tag", []int64{tag.ID}); err != nil {
+	if err := store.SetAgentTags(t.Context(), "agent-uuid-tag", []int64{tag.ID}); err != nil {
 		t.Fatalf("Failed to set agent tags: %v", err)
 	}
 
 	// Assign modA directly, modB to tag
-	_, err = store.AssignModule(context.Background(), "modA", stringPtr("agent-uuid-tag"), nil)
+	_, err = store.AssignModule(t.Context(), "modA", stringPtr("agent-uuid-tag"), nil)
 	if err != nil {
 		t.Fatalf("Failed to assign modA: %v", err)
 	}
-	_, err = store.AssignModule(context.Background(), "modB", nil, &tag.ID)
+	_, err = store.AssignModule(t.Context(), "modB", nil, &tag.ID)
 	if err != nil {
 		t.Fatalf("Failed to assign modB: %v", err)
 	}
@@ -521,31 +520,31 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 		Arch:     "amd64",
 		Distro:   "ubuntu-22.04",
 	}
-	if err := store.UpsertAgent(context.Background(), agent); err != nil {
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
 		t.Fatalf("Failed to create agent: %v", err)
 	}
 
 	// Create two tags
-	tag1, err := store.CreateTag(context.Background(), "tag1")
+	tag1, err := store.CreateTag(t.Context(), "tag1")
 	if err != nil {
 		t.Fatalf("Failed to create tag1: %v", err)
 	}
-	tag2, err := store.CreateTag(context.Background(), "tag2")
+	tag2, err := store.CreateTag(t.Context(), "tag2")
 	if err != nil {
 		t.Fatalf("Failed to create tag2: %v", err)
 	}
 
 	// Assign agent to both tags
-	if err := store.SetAgentTags(context.Background(), "agent-uuid-dedup", []int64{tag1.ID, tag2.ID}); err != nil {
+	if err := store.SetAgentTags(t.Context(), "agent-uuid-dedup", []int64{tag1.ID, tag2.ID}); err != nil {
 		t.Fatalf("Failed to set agent tags: %v", err)
 	}
 
 	// Assign same module to both tags
-	_, err = store.AssignModule(context.Background(), "sharedMod", nil, &tag1.ID)
+	_, err = store.AssignModule(t.Context(), "sharedMod", nil, &tag1.ID)
 	if err != nil {
 		t.Fatalf("Failed to assign sharedMod to tag1: %v", err)
 	}
-	_, err = store.AssignModule(context.Background(), "sharedMod", nil, &tag2.ID)
+	_, err = store.AssignModule(t.Context(), "sharedMod", nil, &tag2.ID)
 	if err != nil {
 		t.Fatalf("Failed to assign sharedMod to tag2: %v", err)
 	}

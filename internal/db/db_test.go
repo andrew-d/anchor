@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -24,11 +23,11 @@ func TestUpsertAgent_NewAgent(t *testing.T) {
 		LastSeenAt: 1000,
 	}
 
-	if err := store.UpsertAgent(context.Background(), agent); err != nil {
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
 		t.Fatalf("UpsertAgent failed: %v", err)
 	}
 
-	retrieved, err := store.GetAgent(context.Background(), agent.ID)
+	retrieved, err := store.GetAgent(t.Context(), agent.ID)
 	if err != nil {
 		t.Fatalf("GetAgent failed: %v", err)
 	}
@@ -61,7 +60,7 @@ func TestUpsertAgent_UpdateExisting(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	agent := Agent{
 		ID:         "agent-123",
 		Hostname:   "web-server-1",
@@ -99,7 +98,7 @@ func TestUpsertAgent_ChangedHostname(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	agent := Agent{
 		ID:         "agent-123",
 		Hostname:   "web-server-1",
@@ -137,7 +136,7 @@ func TestGetAgent_NotFound(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	_, err := store.GetAgent(context.Background(), "nonexistent")
+	_, err := store.GetAgent(t.Context(), "nonexistent")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Expected ErrNotFound, got %v", err)
 	}
@@ -147,7 +146,7 @@ func TestListAgents_Order(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	agents := []Agent{
 		{ID: "a1", Hostname: "zulu", LastSeenAt: 1000},
 		{ID: "a2", Hostname: "alpha", LastSeenAt: 1000},
@@ -182,7 +181,7 @@ func TestCreateTag_Success(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create a tag
 	tag, err := store.CreateTag(ctx, "production")
@@ -216,7 +215,7 @@ func TestSetAgentTags_And_GetAgentTags(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Create agent and tags
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
@@ -248,7 +247,7 @@ func TestSetAgentTags_Replace(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -295,7 +294,7 @@ func TestAssignModule_DirectAgent(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -323,7 +322,7 @@ func TestAssignModule_Tag(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -359,7 +358,7 @@ func TestGetAgentModules_UnionOfDirectAndTag(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -414,7 +413,7 @@ func TestGetAgentModules_Deduplication(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -454,7 +453,7 @@ func TestAssignModule_BothAgentAndTag_Error(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -475,7 +474,7 @@ func TestAssignModule_NeitherAgentNorTag_Error(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	_, err := store.AssignModule(context.Background(), "mod_x", nil, nil)
+	_, err := store.AssignModule(t.Context(), "mod_x", nil, nil)
 	if err == nil {
 		t.Error("Expected error for assignment with neither agent_id nor tag_id, got nil")
 	}
@@ -486,7 +485,7 @@ func TestDeleteTag_Cascades(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -533,7 +532,7 @@ func TestInsertModuleResult_MultipleResultsSameModule(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -580,7 +579,7 @@ func TestGetLatestModuleResults(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -667,7 +666,7 @@ func TestGetLatestModuleResults_DuplicateTimestamp(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -710,7 +709,7 @@ func TestGetModuleHistory_DescendingOrder(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -752,7 +751,7 @@ func TestListAssignments_EmptyDatabase(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	assignments, err := store.ListAssignments(context.Background())
+	assignments, err := store.ListAssignments(t.Context())
 	if err != nil {
 		t.Fatalf("ListAssignments failed: %v", err)
 	}
@@ -766,7 +765,7 @@ func TestListAssignments_ReturnsAllAssignments(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -823,7 +822,7 @@ func TestGetAgentModuleDetails_DirectAssignment(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -860,7 +859,7 @@ func TestGetAgentModuleDetails_TagAssignment(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -907,7 +906,7 @@ func TestGetAgentModuleDetails_BothDirectAndTag(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -976,7 +975,7 @@ func TestGetAgentModuleDetails_Deduplication(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -1025,7 +1024,7 @@ func TestGetAgentModuleDetails_NoModules(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
@@ -1046,7 +1045,7 @@ func TestSetAgentDisplayName(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
 		t.Fatalf("UpsertAgent failed: %v", err)
@@ -1084,7 +1083,7 @@ func TestUpsertAgentPreservesDisplayName(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
 	if err := store.UpsertAgent(ctx, agent); err != nil {
 		t.Fatalf("UpsertAgent failed: %v", err)
@@ -1121,7 +1120,7 @@ func TestConcurrentUpsertAgents(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	const goroutines = 10
 
 	var wg sync.WaitGroup
