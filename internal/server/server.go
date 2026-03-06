@@ -23,6 +23,7 @@ type Server struct {
 	store        db.Store
 	loader       *module.Loader
 	pollInterval int
+	resultsKeep  int
 }
 
 // New creates a new Server.
@@ -32,7 +33,13 @@ func New(port int, modulesDir string, dataDir string) *Server {
 		modulesDir:   modulesDir,
 		dataDir:      dataDir,
 		pollInterval: 300, // default 300 seconds
+		resultsKeep:  100, // default: keep 100 results per agent+module
 	}
+}
+
+// SetResultsKeep sets the number of module results to keep per agent+module pair.
+func (s *Server) SetResultsKeep(n int) {
+	s.resultsKeep = n
 }
 
 // Run starts the HTTP server and blocks until the context is cancelled or it returns an error.
@@ -87,8 +94,11 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	})
 
+	// Start background pruning of old module results
+	go s.pruneLoop(ctx)
+
 	addr := fmt.Sprintf(":%d", s.port)
-	slog.Info("starting server", "addr", addr, "modules_dir", s.modulesDir, "data_dir", s.dataDir)
+	slog.Info("starting server", "addr", addr, "modules_dir", s.modulesDir, "data_dir", s.dataDir, "results_keep", s.resultsKeep)
 
 	httpServer := &http.Server{
 		Addr:    addr,
@@ -109,4 +119,33 @@ func (s *Server) Run(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// pruneLoop periodically deletes old module results.
+func (s *Server) pruneLoop(ctx context.Context) {
+	// Run once at startup to clean up any existing excess rows.
+	s.pruneOnce(ctx)
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.pruneOnce(ctx)
+		}
+	}
+}
+
+func (s *Server) pruneOnce(ctx context.Context) {
+	deleted, err := s.store.PruneModuleResults(ctx, s.resultsKeep)
+	if err != nil {
+		slog.Error("failed to prune module results", "error", err)
+		return
+	}
+	if deleted > 0 {
+		slog.Info("pruned old module results", "deleted", deleted)
+	}
 }

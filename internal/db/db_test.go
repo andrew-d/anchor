@@ -1160,6 +1160,168 @@ func TestConcurrentUpsertAgents(t *testing.T) {
 	}
 }
 
+func TestPruneModuleResults(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := t.Context()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Insert 5 results for mod_a
+	for i := range 5 {
+		if err := store.InsertModuleResult(ctx, ModuleResult{
+			AgentID:    agent.ID,
+			ModuleName: "mod_a",
+			Status:     "ok",
+			Stdout:     fmt.Sprintf("output-%d", i),
+			ExecutedAt: int64(1000 + i),
+		}); err != nil {
+			t.Fatalf("InsertModuleResult failed: %v", err)
+		}
+	}
+
+	// Insert 3 results for mod_b
+	for i := range 3 {
+		if err := store.InsertModuleResult(ctx, ModuleResult{
+			AgentID:    agent.ID,
+			ModuleName: "mod_b",
+			Status:     "ok",
+			Stdout:     fmt.Sprintf("output-%d", i),
+			ExecutedAt: int64(2000 + i),
+		}); err != nil {
+			t.Fatalf("InsertModuleResult failed: %v", err)
+		}
+	}
+
+	// Prune to keep 2 per agent+module
+	deleted, err := store.PruneModuleResults(ctx, 2)
+	if err != nil {
+		t.Fatalf("PruneModuleResults failed: %v", err)
+	}
+
+	// Should have deleted 3 from mod_a (5-2) and 1 from mod_b (3-2) = 4 total
+	if deleted != 4 {
+		t.Errorf("Expected 4 deleted, got %d", deleted)
+	}
+
+	// Verify mod_a has exactly 2 remaining (the most recent)
+	histA, err := store.GetModuleHistory(ctx, agent.ID, "mod_a")
+	if err != nil {
+		t.Fatalf("GetModuleHistory failed: %v", err)
+	}
+	if len(histA) != 2 {
+		t.Errorf("Expected 2 mod_a results, got %d", len(histA))
+	}
+	if histA[0].ExecutedAt != 1004 {
+		t.Errorf("Expected most recent mod_a at 1004, got %d", histA[0].ExecutedAt)
+	}
+	if histA[1].ExecutedAt != 1003 {
+		t.Errorf("Expected second mod_a at 1003, got %d", histA[1].ExecutedAt)
+	}
+
+	// Verify mod_b has exactly 2 remaining
+	histB, err := store.GetModuleHistory(ctx, agent.ID, "mod_b")
+	if err != nil {
+		t.Fatalf("GetModuleHistory failed: %v", err)
+	}
+	if len(histB) != 2 {
+		t.Errorf("Expected 2 mod_b results, got %d", len(histB))
+	}
+}
+
+func TestPruneModuleResults_MultipleAgents(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := t.Context()
+
+	a1 := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	a2 := Agent{ID: "a2", Hostname: "host2", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, a1); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+	if err := store.UpsertAgent(ctx, a2); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Insert 3 results for each agent's mod_a
+	for i := range 3 {
+		if err := store.InsertModuleResult(ctx, ModuleResult{
+			AgentID: "a1", ModuleName: "mod_a", Status: "ok",
+			ExecutedAt: int64(1000 + i),
+		}); err != nil {
+			t.Fatalf("InsertModuleResult failed: %v", err)
+		}
+		if err := store.InsertModuleResult(ctx, ModuleResult{
+			AgentID: "a2", ModuleName: "mod_a", Status: "ok",
+			ExecutedAt: int64(2000 + i),
+		}); err != nil {
+			t.Fatalf("InsertModuleResult failed: %v", err)
+		}
+	}
+
+	// Prune to keep 1 per agent+module
+	deleted, err := store.PruneModuleResults(ctx, 1)
+	if err != nil {
+		t.Fatalf("PruneModuleResults failed: %v", err)
+	}
+
+	if deleted != 4 {
+		t.Errorf("Expected 4 deleted, got %d", deleted)
+	}
+
+	// Each agent should have exactly 1 result (the latest)
+	h1, _ := store.GetModuleHistory(ctx, "a1", "mod_a")
+	if len(h1) != 1 {
+		t.Errorf("Expected 1 result for a1, got %d", len(h1))
+	}
+	h2, _ := store.GetModuleHistory(ctx, "a2", "mod_a")
+	if len(h2) != 1 {
+		t.Errorf("Expected 1 result for a2, got %d", len(h2))
+	}
+}
+
+func TestPruneModuleResults_NothingToPrune(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := t.Context()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// Insert 2 results
+	for i := range 2 {
+		if err := store.InsertModuleResult(ctx, ModuleResult{
+			AgentID: agent.ID, ModuleName: "mod_a", Status: "ok",
+			ExecutedAt: int64(1000 + i),
+		}); err != nil {
+			t.Fatalf("InsertModuleResult failed: %v", err)
+		}
+	}
+
+	// Prune with keep=5 (more than exist)
+	deleted, err := store.PruneModuleResults(ctx, 5)
+	if err != nil {
+		t.Fatalf("PruneModuleResults failed: %v", err)
+	}
+
+	if deleted != 0 {
+		t.Errorf("Expected 0 deleted, got %d", deleted)
+	}
+
+	hist, _ := store.GetModuleHistory(ctx, agent.ID, "mod_a")
+	if len(hist) != 2 {
+		t.Errorf("Expected 2 results, got %d", len(hist))
+	}
+}
+
 // Helper function to create a test store with a temporary database.
 // Marks the test as parallel since each store is fully isolated.
 func newTestStore(t *testing.T) *SQLiteStore {

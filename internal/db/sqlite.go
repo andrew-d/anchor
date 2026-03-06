@@ -382,6 +382,29 @@ ORDER BY executed_at DESC
 	return results, rows.Err()
 }
 
+// PruneModuleResults deletes old module results, keeping only the most recent
+// keepPerModule rows for each agent+module pair. Returns the number of rows deleted.
+func (s *SQLiteStore) PruneModuleResults(ctx context.Context, keepPerModule int) (int64, error) {
+	query := `
+DELETE FROM module_results
+WHERE id NOT IN (
+    SELECT id FROM (
+        SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY agent_id, module_name
+            ORDER BY executed_at DESC, id DESC
+        ) AS rn
+        FROM module_results
+    )
+    WHERE rn <= ?
+)
+`
+	result, err := s.db.ExecContext(ctx, query, keepPerModule)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // ListAssignments returns all module assignments, ordered by module_name.
 func (s *SQLiteStore) ListAssignments(ctx context.Context) ([]ModuleAssignment, error) {
 	query := `SELECT id, module_name, agent_id, tag_id FROM module_assignments ORDER BY module_name`

@@ -83,4 +83,5 @@ type Store interface {
 	InsertModuleResult(ctx context.Context, result ModuleResult) error
 	GetLatestModuleResults(ctx context.Context, agentID string) ([]ModuleResult, error)
 	GetModuleHistory(ctx context.Context, agentID string, moduleName string) ([]ModuleResult, error)
+	PruneModuleResults(ctx context.Context, keepPerModule int) (int64, error)
 }
