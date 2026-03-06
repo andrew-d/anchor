@@ -100,6 +100,12 @@ CREATE INDEX IF NOT EXISTS idx_module_results_lookup
 	return &SQLiteStore{db: db}, nil
 }
 
+// Ping verifies the database connection is alive.
+func (s *SQLiteStore) Ping(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "SELECT 1")
+	return err
+}
+
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	if s.db == nil {

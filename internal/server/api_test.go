@@ -680,6 +680,61 @@ func TestCheckinMethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestHealthzOK tests that GET /healthz returns 200 with a healthy database
+func TestHealthzOK(t *testing.T) {
+	t.Parallel()
+	s, _, _ := newTestServer(t)
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	rec := httptest.NewRecorder()
+	s.handleHealthz(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("Expected status ok, got %s", body["status"])
+	}
+
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %s", ct)
+	}
+}
+
+// TestHealthzDBClosed tests that GET /healthz returns 503 when the database is closed
+func TestHealthzDBClosed(t *testing.T) {
+	t.Parallel()
+	s, store, _ := newTestServer(t)
+
+	// Close the store to simulate a failed database
+	store.(*db.SQLiteStore).Close()
+
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	rec := httptest.NewRecorder()
+	s.handleHealthz(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status 503, got %d", rec.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if body["status"] != "error" {
+		t.Errorf("Expected status error, got %s", body["status"])
+	}
+	if body["error"] == "" {
+		t.Error("Expected error message to be non-empty")
+	}
+}
+
 // Helper functions
 
 func stringPtr(s string) *string {

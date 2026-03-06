@@ -188,3 +188,22 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to encode report response", "error", err)
 	}
 }
+
+// handleHealthz handles GET /healthz requests.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := s.store.Ping(r.Context()); err != nil {
+		slog.Error("health check failed", "error", err)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "error",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "ok",
+	})
+}

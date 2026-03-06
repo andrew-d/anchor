@@ -54,6 +54,9 @@ type ModuleResult struct {
 
 // Store is the interface for all data persistence operations.
 type Store interface {
+	// Ping verifies the database connection is alive.
+	Ping(ctx context.Context) error
+
 	// Agent operations
 	UpsertAgent(ctx context.Context, agent Agent) error
 	GetAgent(ctx context.Context, id string) (Agent, error)
