@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -731,5 +732,171 @@ func TestHealthzDBClosed(t *testing.T) {
 	}
 	if body["error"] == "" {
 		t.Error("Expected error message to be non-empty")
+	}
+}
+
+// TestGetArtifact tests that GET /api/artifacts/{hash} serves the correct file
+func TestGetArtifact(t *testing.T) {
+	t.Parallel()
+	s, _, loader := newTestServer(t)
+
+	// Create a module with artifacts
+	modulesDir := s.modulesDir
+	writeTestModule(t, modulesDir, "00_base", "Base")
+
+	dDir := filepath.Join(modulesDir, "00_base.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	artContent := "artifact content here\n"
+	if err := os.WriteFile(filepath.Join(dDir, "config.txt"), []byte(artContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Load modules to populate artifact index
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+	if len(modules) != 1 || len(modules[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 module with 1 artifact, got %d modules", len(modules))
+	}
+
+	hash := modules[0].Artifacts[0].Hash
+
+	// Test valid hash
+	req := httptest.NewRequest("GET", "/api/artifacts/"+hash, nil)
+	req.SetPathValue("hash", hash)
+	rec := httptest.NewRecorder()
+	s.handleGetArtifact(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+	body, _ := io.ReadAll(rec.Body)
+	if string(body) != artContent {
+		t.Errorf("Body: got %q, want %q", string(body), artContent)
+	}
+}
+
+// TestGetArtifactInvalidHash tests that invalid hashes return 400
+func TestGetArtifactInvalidHash(t *testing.T) {
+	t.Parallel()
+	s, _, _ := newTestServer(t)
+
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{"too_short", "abcd"},
+		{"not_hex", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+		{"empty", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/artifacts/"+tt.hash, nil)
+			req.SetPathValue("hash", tt.hash)
+			rec := httptest.NewRecorder()
+			s.handleGetArtifact(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("Expected status 400, got %d", rec.Code)
+			}
+		})
+	}
+}
+
+// TestGetArtifactNotFound tests that unknown hashes return 404
+func TestGetArtifactNotFound(t *testing.T) {
+	t.Parallel()
+	s, _, _ := newTestServer(t)
+
+	hash := "0000000000000000000000000000000000000000000000000000000000000000"
+	req := httptest.NewRequest("GET", "/api/artifacts/"+hash, nil)
+	req.SetPathValue("hash", hash)
+	rec := httptest.NewRecorder()
+	s.handleGetArtifact(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", rec.Code)
+	}
+}
+
+// TestCheckinWithArtifacts tests that checkin response includes artifact info
+func TestCheckinWithArtifacts(t *testing.T) {
+	t.Parallel()
+	s, store, loader := newTestServer(t)
+
+	// Create module with artifacts
+	modulesDir := s.modulesDir
+	writeTestModule(t, modulesDir, "00_base", "Base")
+
+	dDir := filepath.Join(modulesDir, "00_base.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dDir, "file.txt"), []byte("data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loader.LoadAll(t.Context()); err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Create agent and assign module
+	agent := db.Agent{
+		ID:       "agent-art-1",
+		Hostname: "test-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Distro:   "ubuntu-22.04",
+	}
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AssignModule(t.Context(), "00_base", new("agent-art-1"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := CheckinRequest{
+		ID:       "agent-art-1",
+		Hostname: "test-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Distro:   "ubuntu-22.04",
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("POST", "/api/checkin", bytes.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCheckin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp CheckinResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if len(resp.Modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(resp.Modules))
+	}
+	if len(resp.Modules[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(resp.Modules[0].Artifacts))
+	}
+
+	art := resp.Modules[0].Artifacts[0]
+	if art.RelPath != "file.txt" {
+		t.Errorf("expected rel_path 'file.txt', got '%s'", art.RelPath)
+	}
+	if len(art.Hash) != 64 {
+		t.Errorf("expected 64-char hash, got %d chars", len(art.Hash))
+	}
+	if art.Size != 5 {
+		t.Errorf("expected size 5, got %d", art.Size)
+	}
+	if art.Mode != 0644 {
+		t.Errorf("expected mode 0644, got %04o", art.Mode)
 	}
 }

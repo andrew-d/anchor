@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,8 +60,17 @@ type CheckinResponse struct {
 
 // CheckinModule is a module entry in the checkin response.
 type CheckinModule struct {
-	Name   string `json:"name"`
-	Script string `json:"script"`
+	Name      string            `json:"name"`
+	Script    string            `json:"script"`
+	Artifacts []CheckinArtifact `json:"artifacts,omitempty"`
+}
+
+// CheckinArtifact describes a file artifact associated with a module.
+type CheckinArtifact struct {
+	RelPath string `json:"rel_path"`
+	Hash    string `json:"hash"`
+	Size    int64  `json:"size"`
+	Mode    uint32 `json:"mode"`
 }
 
 // ReportRequest is the JSON body for POST /api/report.
@@ -186,6 +197,63 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		resp.Body.Close()
 
+		// Download artifacts for all modules
+		artifactDir := filepath.Join(a.dataDir, "artifacts")
+		if err := os.MkdirAll(artifactDir, 0755); err != nil {
+			slog.Error("failed to create artifact cache dir", "error", err)
+			if !sleep(ctx, a.retryDelay) {
+				break
+			}
+			continue
+		}
+
+		wantedHashes := make(map[string]bool)
+		moduleArtifacts := make(map[string][]cachedArtifact) // keyed by module name
+
+		artifactErr := false
+		for _, m := range checkinResp.Modules {
+			var cached []cachedArtifact
+			for _, art := range m.Artifacts {
+				cleaned, err := validRelPath(art.RelPath)
+				if err != nil {
+					slog.Error("artifact has invalid relative path", "rel_path", art.RelPath, "module", m.Name, "error", err)
+					artifactErr = true
+					break
+				}
+
+				wantedHashes[art.Hash] = true
+				cachePath := filepath.Join(artifactDir, art.Hash)
+				mode := os.FileMode(art.Mode)
+				if mode == 0 {
+					mode = 0640 // default to unreadable if server sends no mode, in case it contains secrets
+				}
+				if _, err := os.Stat(cachePath); err == nil {
+					cached = append(cached, cachedArtifact{RelPath: cleaned, CachePath: cachePath, Mode: mode})
+					continue
+				}
+				if err := a.downloadArtifact(ctx, art.Hash, cachePath); err != nil {
+					slog.Error("failed to download artifact", "hash", art.Hash, "module", m.Name, "error", err)
+					artifactErr = true
+					break
+				}
+				cached = append(cached, cachedArtifact{RelPath: cleaned, CachePath: cachePath, Mode: mode})
+			}
+			if artifactErr {
+				break
+			}
+			moduleArtifacts[m.Name] = cached
+		}
+
+		if artifactErr {
+			if !sleep(ctx, a.retryDelay) {
+				break
+			}
+			continue
+		}
+
+		// Clean stale artifacts
+		a.cleanStaleArtifacts(artifactDir, wantedHashes)
+
 		// Sort modules by name
 		modules := make([]Module, len(checkinResp.Modules))
 		for i, m := range checkinResp.Modules {
@@ -201,7 +269,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 
 			// Execute module
-			moduleResult := runModule(ctx, mod.Name, mod.Script)
+			moduleResult := runModule(ctx, mod.Name, mod.Script, moduleArtifacts[mod.Name])
 			slog.Info("module executed", "module", mod.Name, "status", moduleResult.Status)
 
 			// Build report request
@@ -262,6 +330,80 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	slog.Info("agent shutdown requested")
 	return nil
+}
+
+// validRelPath checks that a relative path is safe to use: not empty, not
+// absolute, and does not escape upward via "..". Returns the cleaned path
+// or an error.
+func validRelPath(relPath string) (string, error) {
+	cleaned := filepath.Clean(relPath)
+	if cleaned == "" || filepath.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid relative path: %s", relPath)
+	}
+	return cleaned, nil
+}
+
+// downloadArtifact downloads a single artifact by hash, verifies integrity, and
+// atomically places it in the cache.
+func (a *Agent) downloadArtifact(ctx context.Context, hash, cachePath string) error {
+	url := a.serverURL + "/api/artifacts/" + hash
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("artifact download returned status %d", resp.StatusCode)
+	}
+
+	tmpPath := cachePath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		f.Close()
+		os.Remove(tmpPath) // clean up on failure; no-op after successful rename
+	}()
+
+	h := sha256.New()
+	if _, err := io.Copy(f, io.TeeReader(resp.Body, h)); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	gotHash := hex.EncodeToString(h.Sum(nil))
+	if gotHash != hash {
+		return fmt.Errorf("artifact hash mismatch: expected %s, got %s", hash, gotHash)
+	}
+
+	return os.Rename(tmpPath, cachePath)
+}
+
+// cleanStaleArtifacts removes cached artifacts that are not in the wanted set.
+func (a *Agent) cleanStaleArtifacts(artifactDir string, wanted map[string]bool) {
+	entries, err := os.ReadDir(artifactDir)
+	if err != nil {
+		slog.Warn("failed to read artifact cache dir", "error", err)
+		return
+	}
+	for _, e := range entries {
+		if !wanted[e.Name()] {
+			path := filepath.Join(artifactDir, e.Name())
+			if err := os.Remove(path); err != nil {
+				slog.Warn("failed to remove stale artifact", "path", path, "error", err)
+			} else {
+				slog.Debug("removed stale artifact", "hash", e.Name())
+			}
+		}
+	}
 }
 
 // generateUUID generates a UUID v4 string in the format 8-4-4-4-12 hex.

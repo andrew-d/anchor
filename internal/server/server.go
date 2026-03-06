@@ -72,6 +72,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("DELETE /api/assignments/{id}", s.handleDeleteAssignment)
 	mux.HandleFunc("GET /api/agents/{id}/modules", s.handleGetAgentModules)
 	mux.HandleFunc("GET /api/modules", s.handleListModules)
+	mux.HandleFunc("GET /api/artifacts/{hash}", s.handleGetArtifact)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 
 	// Serve static files from embedded filesystem

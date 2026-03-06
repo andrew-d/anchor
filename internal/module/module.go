@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -15,16 +16,26 @@ import (
 	"sync"
 )
 
+// Artifact represents a file in a module's .d directory.
+type Artifact struct {
+	RelPath  string // path relative to .d dir, e.g. "sites/default.conf"
+	Hash     string // SHA-256 hex
+	Size     int64
+	Mode     os.FileMode // permission bits from disk
+	DiskPath string      // absolute path on server for serving
+}
+
 // Module represents a loaded module script with its metadata.
 // IMPORTANT: The module naming convention uses the FILENAME (e.g., "00_base")
 // as the canonical identifier across the system — in module_assignments, API
 // responses, and cache keys. The metadata Name/Description are display-only fields.
 type Module struct {
-	Filename    string // Canonical identifier (the script filename, e.g., "00_base")
-	Name        string // Display name from metadata JSON
-	Description string // Display description from metadata JSON
-	Script      string // Full script content
-	hash        string // SHA-256 hex digest of file contents
+	Filename    string     // Canonical identifier (the script filename, e.g., "00_base")
+	Name        string     // Display name from metadata JSON
+	Description string     // Display description from metadata JSON
+	Script      string     // Full script content
+	Artifacts   []Artifact // Associated files from .d directory, sorted by RelPath
+	hash        string     // SHA-256 hex digest of file contents
 }
 
 // Metadata is the JSON structure returned by a module's "metadata" command.
@@ -42,10 +53,11 @@ type ModuleError struct {
 // Loader reads module scripts from a directory and caches their metadata.
 type Loader struct {
 	dir      string
-	loadMu   sync.Mutex         // serializes LoadAll calls so concurrent loads don't race
-	mu       sync.Mutex         // protects cache reads/writes
-	cache    map[string]*Module // keyed by filename
-	errCache map[string]string  // keyed by filename, value is error message
+	loadMu   sync.Mutex          // serializes LoadAll calls so concurrent loads don't race
+	mu       sync.Mutex          // protects cache reads/writes
+	cache    map[string]*Module  // keyed by filename
+	errCache map[string]string   // keyed by filename, value is error message
+	artIndex map[string]Artifact // reverse index: hash -> Artifact
 }
 
 // NewLoader creates a Loader that reads from the given directory.
@@ -54,6 +66,7 @@ func NewLoader(dir string) *Loader {
 		dir:      dir,
 		cache:    make(map[string]*Module),
 		errCache: make(map[string]string),
+		artIndex: make(map[string]Artifact),
 	}
 }
 
@@ -84,6 +97,14 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 	// All file reads and metadata execution happen here, outside the lock.
 	newCache := make(map[string]*Module)
 	newErrCache := make(map[string]string)
+
+	// Collect directory names so we can match .d dirs to module files.
+	dirSet := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirSet[entry.Name()] = true
+		}
+	}
 
 	for _, entry := range entries {
 		// Only process regular files, skip directories and special files
@@ -120,12 +141,34 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 			}
 			newCache[filename] = module
 		}
+
+		// Walk .d directory for artifacts if it exists
+		dDir := filename + ".d"
+		if dirSet[dDir] {
+			artifacts, err := walkArtifacts(filepath.Join(l.dir, dDir))
+			if err != nil {
+				slog.Warn("failed to walk artifact directory", "file", filename, "dir", dDir, "error", err)
+				delete(newCache, filename)
+				newErrCache[filename] = fmt.Sprintf("walking artifact directory: %v", err)
+				continue
+			}
+			newCache[filename].Artifacts = artifacts
+		}
 	}
 
-	// Atomically swap both caches (files not in directory are dropped - AC4.4)
+	// Build artifact reverse index
+	newArtIndex := make(map[string]Artifact)
+	for _, mod := range newCache {
+		for _, art := range mod.Artifacts {
+			newArtIndex[art.Hash] = art
+		}
+	}
+
+	// Atomically swap caches (files not in directory are dropped - AC4.4)
 	l.mu.Lock()
 	l.cache = newCache
 	l.errCache = newErrCache
+	l.artIndex = newArtIndex
 	l.mu.Unlock()
 
 	// Return sorted slice of all modules for deterministic order
@@ -202,6 +245,67 @@ func (l *Loader) GetModule(filename string) (Module, bool) {
 		return Module{}, false
 	}
 	return *cached, true
+}
+
+// GetArtifactByHash looks up an artifact by its SHA-256 hash.
+func (l *Loader) GetArtifactByHash(hash string) (Artifact, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	art, ok := l.artIndex[hash]
+	return art, ok
+}
+
+// walkArtifacts walks a .d directory and returns sorted artifacts with hashes.
+func walkArtifacts(dDir string) ([]Artifact, error) {
+	var artifacts []Artifact
+	err := filepath.WalkDir(dDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(dDir, path)
+		if err != nil {
+			return err
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		h := sha256.New()
+		size, err := io.Copy(h, f)
+		if err != nil {
+			return err
+		}
+
+		artifacts = append(artifacts, Artifact{
+			RelPath:  relPath,
+			Hash:     hex.EncodeToString(h.Sum(nil)),
+			Size:     size,
+			Mode:     info.Mode().Perm(),
+			DiskPath: path,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(artifacts, func(a, b Artifact) int {
+		return strings.Compare(a.RelPath, b.RelPath)
+	})
+	return artifacts, nil
 }
 
 // LoadErrors returns a sorted list of modules that failed to load.

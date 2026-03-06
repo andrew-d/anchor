@@ -3,8 +3,10 @@ package agent
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -13,6 +15,13 @@ import (
 type Module struct {
 	Name   string
 	Script string
+}
+
+// cachedArtifact describes an artifact that has been downloaded to the local cache.
+type cachedArtifact struct {
+	RelPath   string
+	CachePath string
+	Mode      os.FileMode
 }
 
 // ModuleResult contains the result of running a single module.
@@ -24,44 +33,78 @@ type ModuleResult struct {
 }
 
 // runModule executes a module script and returns its result.
-// The script is written to a temporary file, made executable, and run with the "apply" argument.
+// The script is written to a temporary directory alongside a files/ subdirectory
+// containing any artifacts. The working directory is set to files/.
 // Exit code 0 is mapped to "ok", exit code 80 to "changed", and all other codes to "error".
-func runModule(ctx context.Context, name string, script string) ModuleResult {
+func runModule(ctx context.Context, name string, script string, artifacts []cachedArtifact) ModuleResult {
 	result := ModuleResult{
 		ModuleName: name,
 	}
 
-	// Write script to temp file
-	tmpFile, err := os.CreateTemp("", "anchor-module-*")
+	// Create temp directory for this execution
+	tmpDir, err := os.MkdirTemp("", "anchor-run-*")
 	if err != nil {
 		result.Status = "error"
 		result.Stderr = err.Error()
 		return result
 	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	defer os.RemoveAll(tmpDir)
 
-	if _, err := tmpFile.WriteString(script); err != nil {
+	// Use os.Root to prevent any path traversal from untrusted name/RelPath values.
+	root, err := os.OpenRoot(tmpDir)
+	if err != nil {
+		result.Status = "error"
+		result.Stderr = err.Error()
+		return result
+	}
+	defer root.Close()
+
+	// Write script to tmpDir/{name} — Root rejects traversal in name
+	if err := root.WriteFile(name, []byte(script), 0750); err != nil {
 		result.Status = "error"
 		result.Stderr = err.Error()
 		return result
 	}
 
-	// Make executable
-	if err := tmpFile.Chmod(0755); err != nil {
+	// Create files/ subdirectory
+	filesDir := filepath.Join(tmpDir, "files")
+	if err := root.Mkdir("files", 0750); err != nil {
 		result.Status = "error"
 		result.Stderr = err.Error()
 		return result
 	}
 
-	if err := tmpFile.Close(); err != nil {
+	// Open a sub-root for files/ so artifact RelPaths are confined
+	filesRoot, err := root.OpenRoot("files")
+	if err != nil {
 		result.Status = "error"
 		result.Stderr = err.Error()
 		return result
 	}
+	defer filesRoot.Close()
 
-	// Execute with "apply" argument
-	cmd := exec.CommandContext(ctx, tmpFile.Name(), "apply")
+	// Copy artifacts into files/ preserving relative paths
+	for _, art := range artifacts {
+		// MkdirAll + OpenFile via Root — rejects any path that escapes
+		if dir := filepath.Dir(art.RelPath); dir != "." {
+			if err := filesRoot.MkdirAll(dir, 0750); err != nil {
+				result.Status = "error"
+				result.Stderr = err.Error()
+				return result
+			}
+		}
+		// TODO: use reflinks (copy_file_range / FICLONE) for faster copying on supported filesystems
+		if err := copyFileToRoot(art.CachePath, filesRoot, art.RelPath, art.Mode); err != nil {
+			result.Status = "error"
+			result.Stderr = err.Error()
+			return result
+		}
+	}
+
+	// Execute with "apply" argument; CWD is files/
+	scriptPath := filepath.Join(tmpDir, name)
+	cmd := exec.CommandContext(ctx, scriptPath, "apply")
+	cmd.Dir = filesDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -89,6 +132,27 @@ func runModule(ctx context.Context, name string, script string) ModuleResult {
 	}
 
 	return result
+}
+
+// copyFileToRoot copies src into the given Root at relPath with the given mode.
+// The Root ensures relPath cannot escape its directory tree.
+func copyFileToRoot(src string, root *os.Root, relPath string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := root.OpenFile(relPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // SortModules returns a copy of the modules sorted by name.

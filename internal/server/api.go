@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/andrew-d/anchor/internal/db"
@@ -27,8 +28,17 @@ type CheckinResponse struct {
 
 // CheckinModule is a module entry in the checkin response.
 type CheckinModule struct {
-	Name   string `json:"name"`
-	Script string `json:"script"`
+	Name      string            `json:"name"`
+	Script    string            `json:"script"`
+	Artifacts []CheckinArtifact `json:"artifacts,omitempty"`
+}
+
+// CheckinArtifact describes a file artifact associated with a module.
+type CheckinArtifact struct {
+	RelPath string `json:"rel_path"`
+	Hash    string `json:"hash"`
+	Size    int64  `json:"size"`
+	Mode    uint32 `json:"mode"`
 }
 
 // ReportRequest is the JSON body of POST /api/report.
@@ -109,7 +119,16 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	modules := make([]CheckinModule, 0)
 	for _, name := range assignedNames {
 		if mod, ok := s.loader.GetModule(name); ok {
-			modules = append(modules, CheckinModule{Name: name, Script: mod.Script})
+			cm := CheckinModule{Name: name, Script: mod.Script}
+			for _, art := range mod.Artifacts {
+				cm.Artifacts = append(cm.Artifacts, CheckinArtifact{
+					RelPath: art.RelPath,
+					Hash:    art.Hash,
+					Size:    art.Size,
+					Mode:    uint32(art.Mode),
+				})
+			}
+			modules = append(modules, cm)
 		}
 	}
 
@@ -187,6 +206,25 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("failed to encode report response", "error", err)
 	}
+}
+
+var hexHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// handleGetArtifact handles GET /api/artifacts/{hash} requests.
+func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
+	hash := r.PathValue("hash")
+	if !hexHashPattern.MatchString(hash) {
+		http.Error(w, "invalid hash", http.StatusBadRequest)
+		return
+	}
+
+	art, ok := s.loader.GetArtifactByHash(hash)
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	http.ServeFile(w, r, art.DiskPath)
 }
 
 // handleHealthz handles GET /healthz requests.

@@ -518,6 +518,216 @@ func TestLoadErrors_ClearedOnDelete(t *testing.T) {
 	}
 }
 
+// TestLoadAllWithArtifacts verifies that .d directories are walked and artifacts
+// are collected with correct hashes.
+func TestLoadAllWithArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create a module
+	writeTestModule(t, dir, "00_base", "Base System", "Basic system setup")
+
+	// Create its .d directory with files
+	dDir := filepath.Join(dir, "00_base.d")
+	if err := os.MkdirAll(filepath.Join(dDir, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dDir, "config.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dDir, "subdir", "app.conf"), []byte("key=val\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+
+	arts := modules[0].Artifacts
+	if len(arts) != 2 {
+		t.Fatalf("expected 2 artifacts, got %d", len(arts))
+	}
+
+	// Sorted by RelPath
+	if arts[0].RelPath != "config.txt" {
+		t.Errorf("expected first artifact 'config.txt', got '%s'", arts[0].RelPath)
+	}
+	if arts[1].RelPath != "subdir/app.conf" {
+		t.Errorf("expected second artifact 'subdir/app.conf', got '%s'", arts[1].RelPath)
+	}
+
+	// Verify hashes are non-empty and have correct length
+	for _, art := range arts {
+		if len(art.Hash) != 64 {
+			t.Errorf("expected 64-char hash for %s, got %d chars", art.RelPath, len(art.Hash))
+		}
+		if art.Size <= 0 {
+			t.Errorf("expected positive size for %s, got %d", art.RelPath, art.Size)
+		}
+		if art.DiskPath == "" {
+			t.Errorf("expected non-empty DiskPath for %s", art.RelPath)
+		}
+	}
+}
+
+// TestGetArtifactByHash verifies that artifacts can be looked up by hash.
+func TestGetArtifactByHash(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	dDir := filepath.Join(dir, "00_base.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dDir, "file.txt"), []byte("content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(modules[0].Artifacts))
+	}
+
+	hash := modules[0].Artifacts[0].Hash
+	art, ok := loader.GetArtifactByHash(hash)
+	if !ok {
+		t.Fatal("GetArtifactByHash returned false for known hash")
+	}
+	if art.RelPath != "file.txt" {
+		t.Errorf("expected RelPath 'file.txt', got '%s'", art.RelPath)
+	}
+
+	// Unknown hash
+	_, ok = loader.GetArtifactByHash("0000000000000000000000000000000000000000000000000000000000000000")
+	if ok {
+		t.Error("GetArtifactByHash should return false for unknown hash")
+	}
+}
+
+// TestLoadAllArtifactPermissions verifies that artifact file permissions are captured.
+func TestLoadAllArtifactPermissions(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	dDir := filepath.Join(dir, "00_base.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a regular file (0644) and an executable file (0755)
+	if err := os.WriteFile(filepath.Join(dDir, "config.txt"), []byte("cfg\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dDir, "helper.sh"), []byte("#!/bin/sh\necho hi\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+
+	arts := modules[0].Artifacts
+	if len(arts) != 2 {
+		t.Fatalf("expected 2 artifacts, got %d", len(arts))
+	}
+
+	// Sorted: config.txt, helper.sh
+	if arts[0].Mode != 0644 {
+		t.Errorf("config.txt mode: got %04o, want 0644", arts[0].Mode)
+	}
+	if arts[1].Mode != 0755 {
+		t.Errorf("helper.sh mode: got %04o, want 0755", arts[1].Mode)
+	}
+}
+
+// TestLoadAllModuleWithoutArtifacts verifies that modules without .d directories
+// still work and have empty artifact slices.
+func TestLoadAllModuleWithoutArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if len(modules[0].Artifacts) != 0 {
+		t.Errorf("expected 0 artifacts for module without .d dir, got %d", len(modules[0].Artifacts))
+	}
+}
+
+// TestLoadErrors_BrokenArtifactDir verifies that a module whose .d directory
+// cannot be walked is treated as an error (not silently loaded without artifacts).
+func TestLoadErrors_BrokenArtifactDir(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create a valid module
+	writeTestModule(t, dir, "00_good", "Good", "Works fine")
+
+	// Create another module with a broken .d directory
+	writeTestModule(t, dir, "10_broken_art", "Broken Art", "Has bad .d dir")
+	dDir := filepath.Join(dir, "10_broken_art.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create an unreadable file inside the .d dir to cause walkArtifacts to fail
+	unreadable := filepath.Join(dDir, "secret.conf")
+	if err := os.WriteFile(unreadable, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Make the .d directory unreadable so WalkDir fails
+	if err := os.Chmod(dDir, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dDir, 0755) }) // restore for cleanup
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Only the good module should be returned
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Filename != "00_good" {
+		t.Errorf("expected '00_good', got '%s'", modules[0].Filename)
+	}
+
+	// The broken one should appear in errors
+	errors := loader.LoadErrors()
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errors))
+	}
+	if errors[0].Filename != "10_broken_art" {
+		t.Errorf("expected error for '10_broken_art', got '%s'", errors[0].Filename)
+	}
+}
+
 // TestLoadErrors_SortedByFilename verifies that errors are returned sorted
 // by filename.
 func TestLoadErrors_SortedByFilename(t *testing.T) {

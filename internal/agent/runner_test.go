@@ -3,6 +3,9 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -11,7 +14,7 @@ func TestRunModuleExitCode0(t *testing.T) {
 echo "test output"
 exit 0
 `
-	result := runModule(t.Context(), "test_module", script)
+	result := runModule(t.Context(), "test_module", script, nil)
 
 	if result.ModuleName != "test_module" {
 		t.Errorf("ModuleName: got %q, want %q", result.ModuleName, "test_module")
@@ -29,7 +32,7 @@ func TestRunModuleExitCode80(t *testing.T) {
 echo "changed output"
 exit 80
 `
-	result := runModule(t.Context(), "test_changed", script)
+	result := runModule(t.Context(), "test_changed", script, nil)
 
 	if result.Status != "changed" {
 		t.Errorf("Status: got %q, want %q", result.Status, "changed")
@@ -45,7 +48,7 @@ echo "stdout output"
 echo "stderr output" >&2
 exit 1
 `
-	result := runModule(t.Context(), "test_error", script)
+	result := runModule(t.Context(), "test_error", script, nil)
 
 	if result.Status != "error" {
 		t.Errorf("Status: got %q, want %q", result.Status, "error")
@@ -98,7 +101,7 @@ func TestRunModuleTableDriven(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := runModule(t.Context(), tt.name, tt.script)
+			result := runModule(t.Context(), tt.name, tt.script, nil)
 
 			if result.Status != tt.expectedStatus {
 				t.Errorf("Status: got %q, want %q", result.Status, tt.expectedStatus)
@@ -110,6 +113,133 @@ func TestRunModuleTableDriven(t *testing.T) {
 				t.Errorf("Stderr: got %q, want %q", result.Stderr, tt.expectedStderr)
 			}
 		})
+	}
+}
+
+func TestRunModuleWithArtifacts(t *testing.T) {
+	// Create a cached artifact file
+	cacheDir := t.TempDir()
+	artContent := "hello from artifact\n"
+	artPath := filepath.Join(cacheDir, "test.txt")
+	if err := os.WriteFile(artPath, []byte(artContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create nested artifact
+	nestedContent := "nested content\n"
+	nestedPath := filepath.Join(cacheDir, "nested.conf")
+	if err := os.WriteFile(nestedPath, []byte(nestedContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Script that reads artifact files from CWD (files/)
+	script := `#!/bin/sh
+cat config.txt
+cat subdir/app.conf
+exit 0
+`
+	artifacts := []cachedArtifact{
+		{RelPath: "config.txt", CachePath: artPath, Mode: 0644},
+		{RelPath: "subdir/app.conf", CachePath: nestedPath, Mode: 0644},
+	}
+
+	result := runModule(t.Context(), "test_artifacts", script, artifacts)
+
+	if result.Status != "ok" {
+		t.Errorf("Status: got %q, want %q", result.Status, "ok")
+	}
+	if result.Stdout != artContent+nestedContent {
+		t.Errorf("Stdout: got %q, want %q", result.Stdout, artContent+nestedContent)
+	}
+}
+
+func TestRunModuleArtifactPermissions(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	// Create a non-executable config file (0644)
+	configPath := filepath.Join(cacheDir, "config.txt")
+	if err := os.WriteFile(configPath, []byte("key=val\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an executable helper script (0755)
+	helperPath := filepath.Join(cacheDir, "helper.sh")
+	if err := os.WriteFile(helperPath, []byte("#!/bin/sh\necho helper\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Script checks file permissions using stat
+	script := `#!/bin/sh
+# Check config.txt is NOT executable
+if [ -x config.txt ]; then
+    echo "FAIL: config.txt should not be executable" >&2
+    exit 1
+fi
+# Check helper.sh IS executable
+if [ ! -x helper.sh ]; then
+    echo "FAIL: helper.sh should be executable" >&2
+    exit 1
+fi
+echo "permissions ok"
+exit 0
+`
+	artifacts := []cachedArtifact{
+		{RelPath: "config.txt", CachePath: configPath, Mode: 0644},
+		{RelPath: "helper.sh", CachePath: helperPath, Mode: 0755},
+	}
+
+	result := runModule(t.Context(), "test_perms", script, artifacts)
+
+	if result.Status != "ok" {
+		t.Errorf("Status: got %q, want %q\nStderr: %s", result.Status, "ok", result.Stderr)
+	}
+	if strings.TrimSpace(result.Stdout) != "permissions ok" {
+		t.Errorf("Stdout: got %q, want %q", result.Stdout, "permissions ok\n")
+	}
+}
+
+func TestRunModuleWithNoArtifacts(t *testing.T) {
+	// Script that lists CWD to verify files/ dir exists but is empty
+	script := `#!/bin/sh
+ls | wc -l | tr -d ' '
+exit 0
+`
+	result := runModule(t.Context(), "test_no_artifacts", script, nil)
+
+	if result.Status != "ok" {
+		t.Errorf("Status: got %q, want %q", result.Status, "ok")
+	}
+	if strings.TrimSpace(result.Stdout) != "0" {
+		t.Errorf("Stdout: got %q, want empty directory (0 files)", result.Stdout)
+	}
+}
+
+func TestRunModuleRejectsPathTraversalInArtifactRelPath(t *testing.T) {
+	cacheDir := t.TempDir()
+	artPath := filepath.Join(cacheDir, "evil.txt")
+	if err := os.WriteFile(artPath, []byte("pwned\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := "#!/bin/sh\nexit 0\n"
+	artifacts := []cachedArtifact{
+		{RelPath: "../../etc/evil.conf", CachePath: artPath, Mode: 0644},
+	}
+
+	result := runModule(t.Context(), "test_traversal", script, artifacts)
+
+	if result.Status != "error" {
+		t.Errorf("expected error status for path traversal RelPath, got %q", result.Status)
+	}
+}
+
+func TestRunModuleRejectsPathTraversalInModuleName(t *testing.T) {
+	script := "#!/bin/sh\nexit 0\n"
+
+	result := runModule(t.Context(), "../evil_module", script, nil)
+
+	if result.Status != "error" {
+		t.Errorf("expected error status for path traversal module name, got %q", result.Status)
 	}
 }
 

@@ -31,6 +31,14 @@ Module exit codes for `apply`: 0 = "ok" (no changes needed), 80 = "changed" (cha
 
 The module **filename** (e.g., `00_base`) is the canonical identifier used in assignments, API responses, and database records. The metadata `name` and `description` are display-only. Modules are sorted and executed in filename order.
 
+#### Artifacts
+
+A module may have an associated `<filename>.d/` directory containing arbitrary files (config templates, binaries, etc.). These are distributed to agents via a content-addressable cache (`{dataDir}/artifacts/{sha256}`). During execution, artifacts are copied into a `files/` subdirectory and the module script's working directory is set there, so scripts access artifacts via relative paths.
+
+File permissions are preserved through the pipeline (server loader → checkin response → agent cache → execution directory). The server discovers artifacts by walking `.d` directories; if a `.d` directory exists but cannot be read, the module is treated as a load error.
+
+Path traversal safety: the agent uses `os.Root` to confine all file writes (both the script and artifact copies) within the temporary execution directory.
+
 ### SQLite
 
 Uses `modernc.org/sqlite` (pure Go, no CGO required). Never use in-memory SQLite databases, even in tests. Always use on-disk databases (use `t.TempDir()` in tests).
