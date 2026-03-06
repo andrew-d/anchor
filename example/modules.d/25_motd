@@ -1,0 +1,22 @@
+#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "MOTD", "description": "Renders message-of-the-day from template"}'
+        ;;
+    apply)
+        # Artifacts are available in the working directory.
+        if [ ! -f motd.txt ]; then
+            echo "motd.txt artifact not found" >&2
+            exit 1
+        fi
+
+        # Substitute hostname into the template
+        current=$(cat motd.txt | sed "s/{{HOSTNAME}}/$(hostname)/g")
+        echo "$current"
+        exit 0
+        ;;
+    *)
+        echo "unknown command: $1" >&2
+        exit 1
+        ;;
+esac

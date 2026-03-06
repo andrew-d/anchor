@@ -1,0 +1,3 @@
+Welcome to {{HOSTNAME}}!
+
+This message was deployed by Anchor.
