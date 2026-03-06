@@ -62,9 +62,10 @@ func runServer(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	srv := server.New(*port, *modulesDir, *dataDir)
-	srv.SetPollInterval(*pollInterval)
-	srv.SetResultsKeep(*resultsKeep)
+	srv := server.New(*port, *modulesDir, *dataDir, server.Options{
+		PollInterval: *pollInterval,
+		KeepResults:  *resultsKeep,
+	})
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server error", "error", err)
 		return 1

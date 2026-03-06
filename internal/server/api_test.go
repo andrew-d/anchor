@@ -39,12 +39,12 @@ func newTestServer(t *testing.T) (*Server, db.Store, *module.Loader) {
 
 	// Create server with injected store and loader
 	s := &Server{
-		port:         0, // Not used in tests
-		modulesDir:   modulesDir,
-		dataDir:      dbDir,
-		store:        store,
-		loader:       loader,
-		pollInterval: 300,
+		port:       0, // Not used in tests
+		modulesDir: modulesDir,
+		dataDir:    dbDir,
+		store:      store,
+		loader:     loader,
+		opts:       Options{PollInterval: 300, KeepResults: 100},
 	}
 
 	// Register cleanup

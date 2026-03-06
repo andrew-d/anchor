@@ -15,36 +15,42 @@ import (
 	anchostatic "github.com/andrew-d/anchor/static"
 )
 
+// Options configures the server. All fields are optional and have sensible
+// zero-value defaults unless documented otherwise.
+type Options struct {
+	// PollInterval is the interval in seconds that agents are told to wait
+	// between checkins. Zero defaults to 300 (5 minutes).
+	PollInterval int
+
+	// KeepResults is the number of module results to retain per agent+module
+	// pair. Older results are pruned periodically. Zero defaults to 100.
+	KeepResults int
+}
+
 // Server is the anchor HTTP server.
 type Server struct {
-	port         int
-	modulesDir   string
-	dataDir      string
-	store        db.Store
-	loader       *module.Loader
-	pollInterval int
-	resultsKeep  int
+	port       int
+	modulesDir string
+	dataDir    string
+	store      db.Store
+	loader     *module.Loader
+	opts       Options
 }
 
 // New creates a new Server.
-func New(port int, modulesDir string, dataDir string) *Server {
-	return &Server{
-		port:         port,
-		modulesDir:   modulesDir,
-		dataDir:      dataDir,
-		pollInterval: 300, // default 300 seconds
-		resultsKeep:  100, // default: keep 100 results per agent+module
+func New(port int, modulesDir string, dataDir string, opts Options) *Server {
+	if opts.PollInterval <= 0 {
+		opts.PollInterval = 300
 	}
-}
-
-// SetPollInterval sets the poll interval (in seconds) that agents are told to use.
-func (s *Server) SetPollInterval(n int) {
-	s.pollInterval = n
-}
-
-// SetResultsKeep sets the number of module results to keep per agent+module pair.
-func (s *Server) SetResultsKeep(n int) {
-	s.resultsKeep = n
+	if opts.KeepResults <= 0 {
+		opts.KeepResults = 100
+	}
+	return &Server{
+		port:       port,
+		modulesDir: modulesDir,
+		dataDir:    dataDir,
+		opts:       opts,
+	}
 }
 
 // Run starts the HTTP server and blocks until the context is cancelled or it returns an error.
@@ -104,7 +110,7 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.pruneLoop(ctx)
 
 	addr := fmt.Sprintf(":%d", s.port)
-	slog.Info("starting server", "addr", addr, "modules_dir", s.modulesDir, "data_dir", s.dataDir, "results_keep", s.resultsKeep)
+	slog.Info("starting server", "addr", addr, "modules_dir", s.modulesDir, "data_dir", s.dataDir, "results_keep", s.opts.KeepResults)
 
 	httpServer := &http.Server{
 		Addr:    addr,
@@ -146,7 +152,7 @@ func (s *Server) pruneLoop(ctx context.Context) {
 }
 
 func (s *Server) pruneOnce(ctx context.Context) {
-	deleted, err := s.store.PruneModuleResults(ctx, s.resultsKeep)
+	deleted, err := s.store.PruneModuleResults(ctx, s.opts.KeepResults)
 	if err != nil {
 		slog.Error("failed to prune module results", "error", err)
 		return

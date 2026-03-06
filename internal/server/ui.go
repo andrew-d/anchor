@@ -104,7 +104,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().Unix()
-	staleThreshold := int64(2 * s.pollInterval)
+	staleThreshold := int64(2 * s.opts.PollInterval)
 
 	// Convert to response format
 	agentResponses := []UIAgentResponse{}
@@ -162,7 +162,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare response
 	resp := ListAgentsResponse{
-		PollIntervalSeconds: s.pollInterval,
+		PollIntervalSeconds: s.opts.PollInterval,
 		Agents:              agentResponses,
 	}
 
@@ -208,7 +208,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Compute health
 	now := time.Now().Unix()
-	staleThreshold := int64(2 * s.pollInterval)
+	staleThreshold := int64(2 * s.opts.PollInterval)
 	errorCount := 0
 	for _, mr := range moduleResults {
 		if mr.Status == "error" {

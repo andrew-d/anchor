@@ -134,7 +134,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 
 	// Return JSON response
 	resp := CheckinResponse{
-		PollIntervalSeconds: s.pollInterval,
+		PollIntervalSeconds: s.opts.PollInterval,
 		Modules:             modules,
 	}
 

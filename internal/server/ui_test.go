@@ -166,7 +166,7 @@ func TestListAgentsStaleStatus(t *testing.T) {
 
 	// Create agent with old check-in (older than 2x poll interval)
 	now := time.Now().Unix()
-	oldTime := now - int64(2*s.pollInterval) - 100 // older than threshold
+	oldTime := now - int64(2*s.opts.PollInterval) - 100 // older than threshold
 	agent := db.Agent{
 		ID:         "agent-3",
 		Hostname:   "web-03",
@@ -465,7 +465,7 @@ func TestListAgentsMultipleStatus(t *testing.T) {
 	}
 
 	// Create stale agent
-	oldTime := now - int64(2*s.pollInterval) - 100
+	oldTime := now - int64(2*s.opts.PollInterval) - 100
 	agent3 := db.Agent{
 		ID:         "stale-agent",
 		Hostname:   "web-stale",
