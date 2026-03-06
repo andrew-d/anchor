@@ -261,7 +261,7 @@ func TestCheckinWithModules(t *testing.T) {
 	}
 
 	// Assign module to agent
-	_, err := store.AssignModule(t.Context(), "test_module", stringPtr("agent-uuid-mod1"), nil)
+	_, err := store.AssignModule(t.Context(), "test_module", new("agent-uuid-mod1"), nil)
 	if err != nil {
 		t.Fatalf("Failed to assign module: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 	}
 
 	// Assign modA directly, modB to tag
-	_, err = store.AssignModule(t.Context(), "modA", stringPtr("agent-uuid-tag"), nil)
+	_, err = store.AssignModule(t.Context(), "modA", new("agent-uuid-tag"), nil)
 	if err != nil {
 		t.Fatalf("Failed to assign modA: %v", err)
 	}
@@ -732,10 +732,4 @@ func TestHealthzDBClosed(t *testing.T) {
 	if body["error"] == "" {
 		t.Error("Expected error message to be non-empty")
 	}
-}
-
-// Helper functions
-
-func stringPtr(s string) *string {
-	return &s
 }

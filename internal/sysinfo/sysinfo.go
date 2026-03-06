@@ -15,9 +15,9 @@ type SystemInfo struct {
 // parseDistroFromOSRelease extracts the PRETTY_NAME field from /etc/os-release content.
 // Returns "unknown" if the field is not found or content is empty.
 func parseDistroFromOSRelease(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "PRETTY_NAME=") {
-			val := strings.TrimPrefix(line, "PRETTY_NAME=")
+	for line := range strings.SplitSeq(content, "\n") {
+		if after, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+			val := after
 			return strings.Trim(val, "\"")
 		}
 	}
@@ -28,12 +28,12 @@ func parseDistroFromOSRelease(content string) string {
 // Returns "unknown" if either field is missing.
 func parseDistroFromSwVers(content string) string {
 	var name, version string
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "ProductName:") {
-			name = strings.TrimSpace(strings.TrimPrefix(line, "ProductName:"))
+	for line := range strings.SplitSeq(content, "\n") {
+		if after, ok := strings.CutPrefix(line, "ProductName:"); ok {
+			name = strings.TrimSpace(after)
 		}
-		if strings.HasPrefix(line, "ProductVersion:") {
-			version = strings.TrimSpace(strings.TrimPrefix(line, "ProductVersion:"))
+		if after, ok := strings.CutPrefix(line, "ProductVersion:"); ok {
+			version = strings.TrimSpace(after)
 		}
 	}
 	if name != "" && version != "" {

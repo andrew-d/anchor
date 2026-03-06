@@ -1127,9 +1127,7 @@ func TestConcurrentUpsertAgents(t *testing.T) {
 	errs := make(chan error, goroutines)
 
 	for i := range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			agent := Agent{
 				ID:         fmt.Sprintf("agent-%d", i),
 				Hostname:   fmt.Sprintf("host-%d", i),
@@ -1142,7 +1140,7 @@ func TestConcurrentUpsertAgents(t *testing.T) {
 			if err := store.UpsertAgent(ctx, agent); err != nil {
 				errs <- fmt.Errorf("goroutine %d: %w", i, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
