@@ -14,7 +14,7 @@ func TestRunModuleExitCode0(t *testing.T) {
 echo "test output"
 exit 0
 `
-	result := runModule(t.Context(), "test_module", script, nil)
+	result := runModule(t.Context(), t.TempDir(), "test_module", script, nil)
 
 	if result.ModuleName != "test_module" {
 		t.Errorf("ModuleName: got %q, want %q", result.ModuleName, "test_module")
@@ -32,7 +32,7 @@ func TestRunModuleExitCode80(t *testing.T) {
 echo "changed output"
 exit 80
 `
-	result := runModule(t.Context(), "test_changed", script, nil)
+	result := runModule(t.Context(), t.TempDir(), "test_changed", script, nil)
 
 	if result.Status != "changed" {
 		t.Errorf("Status: got %q, want %q", result.Status, "changed")
@@ -48,7 +48,7 @@ echo "stdout output"
 echo "stderr output" >&2
 exit 1
 `
-	result := runModule(t.Context(), "test_error", script, nil)
+	result := runModule(t.Context(), t.TempDir(), "test_error", script, nil)
 
 	if result.Status != "error" {
 		t.Errorf("Status: got %q, want %q", result.Status, "error")
@@ -101,7 +101,7 @@ func TestRunModuleTableDriven(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := runModule(t.Context(), tt.name, tt.script, nil)
+			result := runModule(t.Context(), t.TempDir(), tt.name, tt.script, nil)
 
 			if result.Status != tt.expectedStatus {
 				t.Errorf("Status: got %q, want %q", result.Status, tt.expectedStatus)
@@ -143,7 +143,7 @@ exit 0
 		{RelPath: "subdir/app.conf", CachePath: nestedPath, Mode: 0644},
 	}
 
-	result := runModule(t.Context(), "test_artifacts", script, artifacts)
+	result := runModule(t.Context(), t.TempDir(), "test_artifacts", script, artifacts)
 
 	if result.Status != "ok" {
 		t.Errorf("Status: got %q, want %q", result.Status, "ok")
@@ -188,7 +188,7 @@ exit 0
 		{RelPath: "helper.sh", CachePath: helperPath, Mode: 0755},
 	}
 
-	result := runModule(t.Context(), "test_perms", script, artifacts)
+	result := runModule(t.Context(), t.TempDir(), "test_perms", script, artifacts)
 
 	if result.Status != "ok" {
 		t.Errorf("Status: got %q, want %q\nStderr: %s", result.Status, "ok", result.Stderr)
@@ -204,7 +204,7 @@ func TestRunModuleWithNoArtifacts(t *testing.T) {
 ls | wc -l | tr -d ' '
 exit 0
 `
-	result := runModule(t.Context(), "test_no_artifacts", script, nil)
+	result := runModule(t.Context(), t.TempDir(), "test_no_artifacts", script, nil)
 
 	if result.Status != "ok" {
 		t.Errorf("Status: got %q, want %q", result.Status, "ok")
@@ -226,7 +226,7 @@ func TestRunModuleRejectsPathTraversalInArtifactRelPath(t *testing.T) {
 		{RelPath: "../../etc/evil.conf", CachePath: artPath, Mode: 0644},
 	}
 
-	result := runModule(t.Context(), "test_traversal", script, artifacts)
+	result := runModule(t.Context(), t.TempDir(), "test_traversal", script, artifacts)
 
 	if result.Status != "error" {
 		t.Errorf("expected error status for path traversal RelPath, got %q", result.Status)
@@ -236,7 +236,7 @@ func TestRunModuleRejectsPathTraversalInArtifactRelPath(t *testing.T) {
 func TestRunModuleRejectsPathTraversalInModuleName(t *testing.T) {
 	script := "#!/bin/sh\nexit 0\n"
 
-	result := runModule(t.Context(), "../evil_module", script, nil)
+	result := runModule(t.Context(), t.TempDir(), "../evil_module", script, nil)
 
 	if result.Status != "error" {
 		t.Errorf("expected error status for path traversal module name, got %q", result.Status)

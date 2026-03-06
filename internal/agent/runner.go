@@ -3,12 +3,13 @@ package agent
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/andrew-d/anchor/internal/copyfile"
 )
 
 // Module represents a module to be executed.
@@ -33,16 +34,19 @@ type ModuleResult struct {
 }
 
 // runModule executes a module script and returns its result.
+// runDir is the base directory for temporary execution directories; it should
+// be on the same filesystem as the artifact cache so that reflink copies work.
 // The script is written to a temporary directory alongside a files/ subdirectory
 // containing any artifacts. The working directory is set to files/.
 // Exit code 0 is mapped to "ok", exit code 80 to "changed", and all other codes to "error".
-func runModule(ctx context.Context, name string, script string, artifacts []cachedArtifact) ModuleResult {
+func runModule(ctx context.Context, runDir string, name string, script string, artifacts []cachedArtifact) ModuleResult {
 	result := ModuleResult{
 		ModuleName: name,
 	}
 
-	// Create temp directory for this execution
-	tmpDir, err := os.MkdirTemp("", "anchor-run-*")
+	// Create temp directory for this execution under runDir so it shares
+	// a filesystem with the artifact cache, enabling reflink copies.
+	tmpDir, err := os.MkdirTemp(runDir, "anchor-run-*")
 	if err != nil {
 		result.Status = "error"
 		result.Stderr = err.Error()
@@ -83,9 +87,11 @@ func runModule(ctx context.Context, name string, script string, artifacts []cach
 	}
 	defer filesRoot.Close()
 
-	// Copy artifacts into files/ preserving relative paths
+	// Copy artifacts into files/ preserving relative paths.
+	// Files are opened via os.Root for path traversal safety, then copied
+	// using copyfile.Clone which tries FICLONE reflink first, falling back
+	// to io.Copy (which uses copy_file_range internally).
 	for _, art := range artifacts {
-		// MkdirAll + OpenFile via Root — rejects any path that escapes
 		if dir := filepath.Dir(art.RelPath); dir != "." {
 			if err := filesRoot.MkdirAll(dir, 0750); err != nil {
 				result.Status = "error"
@@ -93,8 +99,7 @@ func runModule(ctx context.Context, name string, script string, artifacts []cach
 				return result
 			}
 		}
-		// TODO: use reflinks (copy_file_range / FICLONE) for faster copying on supported filesystems
-		if err := copyFileToRoot(art.CachePath, filesRoot, art.RelPath, art.Mode); err != nil {
+		if err := cloneArtifact(art, filesRoot); err != nil {
 			result.Status = "error"
 			result.Stderr = err.Error()
 			return result
@@ -134,25 +139,25 @@ func runModule(ctx context.Context, name string, script string, artifacts []cach
 	return result
 }
 
-// copyFileToRoot copies src into the given Root at relPath with the given mode.
-// The Root ensures relPath cannot escape its directory tree.
-func copyFileToRoot(src string, root *os.Root, relPath string, mode os.FileMode) error {
-	in, err := os.Open(src)
+// cloneArtifact copies a cached artifact into the execution directory using
+// os.Root for path confinement and copyfile.Clone for efficient data copy.
+func cloneArtifact(art cachedArtifact, filesRoot *os.Root) error {
+	src, err := os.Open(art.CachePath)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer src.Close()
 
-	out, err := root.OpenFile(relPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	dst, err := filesRoot.OpenFile(art.RelPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, art.Mode)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer dst.Close()
 
-	if _, err := io.Copy(out, in); err != nil {
+	if err := copyfile.Clone(dst, src); err != nil {
 		return err
 	}
-	return out.Close()
+	return dst.Close()
 }
 
 // SortModules returns a copy of the modules sorted by name.

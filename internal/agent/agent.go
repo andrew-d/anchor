@@ -254,6 +254,17 @@ func (a *Agent) Run(ctx context.Context) error {
 		// Clean stale artifacts
 		a.cleanStaleArtifacts(artifactDir, wantedHashes)
 
+		// Create run directory on the same filesystem as the artifact cache
+		// so that reflink copies can be used.
+		runDir := filepath.Join(a.dataDir, "run")
+		if err := os.MkdirAll(runDir, 0755); err != nil {
+			slog.Error("failed to create run dir", "error", err)
+			if !sleep(ctx, a.retryDelay) {
+				break
+			}
+			continue
+		}
+
 		// Sort modules by name
 		modules := make([]Module, len(checkinResp.Modules))
 		for i, m := range checkinResp.Modules {
@@ -269,7 +280,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 
 			// Execute module
-			moduleResult := runModule(ctx, mod.Name, mod.Script, moduleArtifacts[mod.Name])
+			moduleResult := runModule(ctx, runDir, mod.Name, mod.Script, moduleArtifacts[mod.Name])
 			slog.Info("module executed", "module", mod.Name, "status", moduleResult.Status)
 
 			// Build report request
