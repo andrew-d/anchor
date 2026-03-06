@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/andrew-d/anchor/internal/agent"
@@ -48,12 +49,18 @@ func main() {
 }
 
 func runServer(args []string) int {
+	defaultModulesDir := "/etc/anchor-server/modules.d"
+	if v := os.Getenv("CONFIGURATION_DIRECTORY"); v != "" {
+		defaultModulesDir = filepath.Join(v, "modules.d")
+	}
+	defaultDataDir := envOrDefault("STATE_DIRECTORY", "/var/lib/anchor-server")
+
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
 	port := fs.Int("port", 8080, "HTTP listen port")
-	modulesDir := fs.String("modules-dir", "/etc/anchor/modules.d", "Directory containing module scripts")
-	dataDir := fs.String("data-dir", "/var/lib/anchor", "Directory for persistent data (SQLite database)")
-	pollInterval := fs.Int("poll-interval", 300, "Poll interval in seconds sent to agents")
-	resultsKeep := fs.Int("results-keep", 100, "Number of module results to keep per agent+module pair")
+	modulesDir := fs.String("modules-dir", defaultModulesDir, "directory containing module scripts")
+	dataDir := fs.String("data-dir", defaultDataDir, "directory for persistent data (e.g. SQLite database)")
+	pollInterval := fs.Int("poll-interval", 300, "poll interval in seconds sent to agents")
+	keepResults := fs.Int("keep-results", 100, "number of module results to keep per agent+module pair")
 	if err := fs.Parse(args); err != nil {
 		slog.Error("failed to parse flags", "error", err)
 		return 1
@@ -64,7 +71,7 @@ func runServer(args []string) int {
 
 	srv := server.New(*port, *modulesDir, *dataDir, server.Options{
 		PollInterval: *pollInterval,
-		KeepResults:  *resultsKeep,
+		KeepResults:  *keepResults,
 	})
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server error", "error", err)
@@ -74,11 +81,18 @@ func runServer(args []string) int {
 }
 
 func runAgent(args []string) int {
+	defaultDataDir := envOrDefault("STATE_DIRECTORY", "/var/lib/anchor")
+
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
-	serverURL := fs.String("server", "http://localhost:8080", "Server URL")
-	dataDir := fs.String("data-dir", "/var/lib/anchor", "Directory for persistent data (agent UUID)")
+	serverURL := fs.String("server", "", "server URL")
+	dataDir := fs.String("data-dir", defaultDataDir, "directory for persistent data")
 	if err := fs.Parse(args); err != nil {
 		slog.Error("failed to parse flags", "error", err)
+		return 1
+	}
+
+	if *serverURL == "" {
+		slog.Error("server URL is required")
 		return 1
 	}
 
@@ -103,4 +117,17 @@ func runAgent(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// envOrDefault returns the value of the environment variable named by key if
+// set and non-empty, otherwise it returns fallback. This is used to support
+// systemd's StateDirectory= and ConfigurationDirectory= directives, which set
+// $STATE_DIRECTORY and $CONFIGURATION_DIRECTORY respectively. Under systemd,
+// each unit has its own environment so there is no collision between the server
+// and agent both reading $STATE_DIRECTORY.
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

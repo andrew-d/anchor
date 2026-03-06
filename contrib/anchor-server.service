@@ -10,10 +10,10 @@ RestartSec=5
 
 # Sandboxing
 DynamicUser=yes
-StateDirectory=anchor
+StateDirectory=anchor-server
+ConfigurationDirectory=anchor-server
 ProtectSystem=strict
 ProtectHome=yes
-ReadOnlyPaths=/etc/anchor/modules.d
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

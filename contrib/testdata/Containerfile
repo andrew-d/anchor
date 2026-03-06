@@ -1,0 +1,2 @@
+FROM debian:bookworm
+RUN apt-get update -qq && apt-get install -y -qq systemd-sysv curl >/dev/null 2>&1

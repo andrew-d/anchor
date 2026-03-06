@@ -1,0 +1,5 @@
+#!/bin/sh
+case "$1" in
+    metadata) echo '{"name":"test","description":"test module"}' ;;
+    apply) echo "ok"; exit 0 ;;
+esac

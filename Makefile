@@ -1,13 +1,16 @@
-.PHONY: help build test lint fmt format fmt-check gofix gofix-check deps deps-check ci
+.PHONY: help build test integration-test lint fmt format fmt-check gofix gofix-check deps deps-check ci
 
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
 build: ## Build all packages
 	go build ./...
 
-test: ## Run all tests
-	go test ./... -count=1
+test: ## Run unit tests (use TEST_FLAGS to customize, e.g. TEST_FLAGS="-run TestFoo")
+	go test ./... -count=1 -short $(TEST_FLAGS)
+
+integration-test: ## Run integration tests (requires podman; may need sudo)
+	go test ./... -count=1 -run Integration -timeout 300s $(TEST_FLAGS)
 
 lint: ## Run go vet
 	go vet ./...
