@@ -47,7 +47,7 @@ echo "Starting server on port $PORT..."
 echo "  modules dir: $MODULES_DIR"
 echo "  data dir:    $SERVER_DATA"
 echo ""
-$ANCHOR server -port "$PORT" -modules-dir "$MODULES_DIR" -data-dir "$SERVER_DATA" &
+$ANCHOR server -port "$PORT" -modules-dir "$MODULES_DIR" -data-dir "$SERVER_DATA" -poll-interval 30 &
 SERVER_PID=$!
 PIDS="$SERVER_PID"
 

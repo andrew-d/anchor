@@ -37,6 +37,11 @@ func New(port int, modulesDir string, dataDir string) *Server {
 	}
 }
 
+// SetPollInterval sets the poll interval (in seconds) that agents are told to use.
+func (s *Server) SetPollInterval(n int) {
+	s.pollInterval = n
+}
+
 // SetResultsKeep sets the number of module results to keep per agent+module pair.
 func (s *Server) SetResultsKeep(n int) {
 	s.resultsKeep = n

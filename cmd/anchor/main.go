@@ -52,6 +52,7 @@ func runServer(args []string) int {
 	port := fs.Int("port", 8080, "HTTP listen port")
 	modulesDir := fs.String("modules-dir", "/etc/anchor/modules.d", "Directory containing module scripts")
 	dataDir := fs.String("data-dir", "/var/lib/anchor", "Directory for persistent data (SQLite database)")
+	pollInterval := fs.Int("poll-interval", 300, "Poll interval in seconds sent to agents")
 	resultsKeep := fs.Int("results-keep", 100, "Number of module results to keep per agent+module pair")
 	if err := fs.Parse(args); err != nil {
 		slog.Error("failed to parse flags", "error", err)
@@ -62,6 +63,7 @@ func runServer(args []string) int {
 	defer stop()
 
 	srv := server.New(*port, *modulesDir, *dataDir)
+	srv.SetPollInterval(*pollInterval)
 	srv.SetResultsKeep(*resultsKeep)
 	if err := srv.Run(ctx); err != nil {
 		slog.Error("server error", "error", err)
