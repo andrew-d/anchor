@@ -92,6 +92,10 @@ func (s *Server) computeHealth(agent *UIAgentResponse, now int64, staleThreshold
 }
 
 // handleListAgents handles GET /api/agents.
+//
+// TODO: This handler issues 1+2N queries (module results + tags per agent).
+// Fine for small homelab fleets; if it becomes a bottleneck, add bulk Store
+// methods that fetch all results/tags in one query and assemble in Go.
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
