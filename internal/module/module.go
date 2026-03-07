@@ -52,14 +52,21 @@ type ModuleError struct {
 	Error    string
 }
 
+// cachedError records a load failure together with the file hash so we can
+// suppress duplicate warnings when the file hasn't changed on disk.
+type cachedError struct {
+	hash    string
+	message string
+}
+
 // Loader reads module scripts from a directory and caches their metadata.
 type Loader struct {
 	dir      string
-	group    singleflight.Group  // deduplicates concurrent LoadAll calls
-	mu       sync.Mutex          // protects cache reads/writes
-	cache    map[string]*Module  // keyed by filename
-	errCache map[string]string   // keyed by filename, value is error message
-	artIndex map[string]Artifact // reverse index: hash -> Artifact
+	group    singleflight.Group      // deduplicates concurrent LoadAll calls
+	mu       sync.Mutex              // protects cache reads/writes
+	cache    map[string]*Module      // keyed by filename
+	errCache map[string]*cachedError // keyed by filename
+	artIndex map[string]Artifact     // reverse index: hash -> Artifact
 }
 
 // NewLoader creates a Loader that reads from the given directory.
@@ -67,7 +74,7 @@ func NewLoader(dir string) *Loader {
 	return &Loader{
 		dir:      dir,
 		cache:    make(map[string]*Module),
-		errCache: make(map[string]string),
+		errCache: make(map[string]*cachedError),
 		artIndex: make(map[string]Artifact),
 	}
 }
@@ -90,10 +97,11 @@ func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
 
 // loadAll is the actual implementation called via singleflight.
 func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
-	// Snapshot the current cache so we can compare hashes without holding
+	// Snapshot the current caches so we can compare hashes without holding
 	// mu during I/O.
 	l.mu.Lock()
 	oldCache := l.cache
+	oldErrCache := l.errCache
 	l.mu.Unlock()
 
 	// Read all files from the directory
@@ -105,7 +113,7 @@ func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 	// Build a new cache with modules from the current state of the directory.
 	// All file reads and metadata execution happen here, outside the lock.
 	newCache := make(map[string]*Module)
-	newErrCache := make(map[string]string)
+	newErrCache := make(map[string]*cachedError)
 
 	// Collect directory names so we can match .d dirs to module files.
 	dirSet := make(map[string]bool)
@@ -128,7 +136,7 @@ func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 		contents, err := os.ReadFile(path)
 		if err != nil {
 			slog.Warn("failed to read module file", "file", filename, "error", err)
-			newErrCache[filename] = err.Error()
+			newErrCache[filename] = &cachedError{message: err.Error()}
 			continue
 		}
 
@@ -140,12 +148,16 @@ func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 		if cached, exists := oldCache[filename]; exists && cached.hash == hashHex {
 			// Reuse cached module (AC4.5 - unchanged files)
 			newCache[filename] = cached
+		} else if ce, exists := oldErrCache[filename]; exists && ce.hash == hashHex {
+			// File unchanged and previously failed — reuse cached error silently
+			newErrCache[filename] = ce
+			continue
 		} else {
 			// Hash differs or file is new - parse metadata
 			module, err := parseModule(ctx, filename, string(contents), hashHex)
 			if err != nil {
 				slog.Warn("failed to parse module metadata", "file", filename, "error", err)
-				newErrCache[filename] = err.Error()
+				newErrCache[filename] = &cachedError{hash: hashHex, message: err.Error()}
 				continue
 			}
 			newCache[filename] = module
@@ -158,7 +170,7 @@ func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 			if err != nil {
 				slog.Warn("failed to walk artifact directory", "file", filename, "dir", dDir, "error", err)
 				delete(newCache, filename)
-				newErrCache[filename] = fmt.Sprintf("walking artifact directory: %v", err)
+				newErrCache[filename] = &cachedError{hash: hashHex, message: fmt.Sprintf("walking artifact directory: %v", err)}
 				continue
 			}
 			newCache[filename].Artifacts = artifacts
@@ -323,8 +335,8 @@ func (l *Loader) LoadErrors() []ModuleError {
 	defer l.mu.Unlock()
 
 	errors := make([]ModuleError, 0, len(l.errCache))
-	for filename, errMsg := range l.errCache {
-		errors = append(errors, ModuleError{Filename: filename, Error: errMsg})
+	for filename, ce := range l.errCache {
+		errors = append(errors, ModuleError{Filename: filename, Error: ce.message})
 	}
 	slices.SortFunc(errors, func(a, b ModuleError) int {
 		return strings.Compare(a.Filename, b.Filename)
