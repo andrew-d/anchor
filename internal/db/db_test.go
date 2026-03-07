@@ -480,6 +480,81 @@ func TestAssignModule_NeitherAgentNorTag_Error(t *testing.T) {
 	}
 }
 
+func TestAssignModule_DuplicateAgent_Error(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := t.Context()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+
+	// First assignment should succeed
+	_, err := store.AssignModule(ctx, "mod_a", &agent.ID, nil)
+	if err != nil {
+		t.Fatalf("first AssignModule failed: %v", err)
+	}
+
+	// Duplicate assignment to same agent should fail
+	_, err = store.AssignModule(ctx, "mod_a", &agent.ID, nil)
+	if err == nil {
+		t.Error("expected error for duplicate agent assignment, got nil")
+	}
+}
+
+func TestAssignModule_DuplicateTag_Error(t *testing.T) {
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := t.Context()
+
+	tag, err := store.CreateTag(ctx, "prod")
+	if err != nil {
+		t.Fatalf("CreateTag failed: %v", err)
+	}
+
+	// First assignment should succeed
+	_, err = store.AssignModule(ctx, "mod_b", nil, &tag.ID)
+	if err != nil {
+		t.Fatalf("first AssignModule failed: %v", err)
+	}
+
+	// Duplicate assignment to same tag should fail
+	_, err = store.AssignModule(ctx, "mod_b", nil, &tag.ID)
+	if err == nil {
+		t.Error("expected error for duplicate tag assignment, got nil")
+	}
+}
+
+func TestAssignModule_SameModuleDifferentTargets_OK(t *testing.T) {
+	// Same module assigned to an agent AND a tag is allowed (different targets)
+	store := newTestStore(t)
+	defer store.Close()
+
+	ctx := t.Context()
+
+	agent := Agent{ID: "a1", Hostname: "host1", LastSeenAt: 1000}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("UpsertAgent failed: %v", err)
+	}
+	tag, err := store.CreateTag(ctx, "prod")
+	if err != nil {
+		t.Fatalf("CreateTag failed: %v", err)
+	}
+
+	_, err = store.AssignModule(ctx, "mod_a", &agent.ID, nil)
+	if err != nil {
+		t.Fatalf("AssignModule to agent failed: %v", err)
+	}
+
+	_, err = store.AssignModule(ctx, "mod_a", nil, &tag.ID)
+	if err != nil {
+		t.Fatalf("AssignModule to tag failed: %v", err)
+	}
+}
+
 func TestDeleteTag_Cascades(t *testing.T) {
 	// DeleteTag cascades to agent_tags and module_assignments
 	store := newTestStore(t)

@@ -8,7 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // SQLiteStore implements Store using a SQLite database.
@@ -77,6 +78,11 @@ CREATE TABLE IF NOT EXISTS module_assignments (
     tag_id INTEGER REFERENCES tags(id) ON DELETE CASCADE,
     CHECK ((agent_id IS NOT NULL AND tag_id IS NULL) OR (agent_id IS NULL AND tag_id IS NOT NULL))
 ) STRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_module_assignments_agent
+    ON module_assignments (module_name, agent_id) WHERE agent_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_module_assignments_tag
+    ON module_assignments (module_name, tag_id) WHERE tag_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS module_results (
     id INTEGER PRIMARY KEY,
@@ -263,10 +269,15 @@ ORDER BY t.name
 }
 
 // AssignModule assigns a module to either an agent or a tag.
+// Returns ErrDuplicate if the same module is already assigned to the same target.
 func (s *SQLiteStore) AssignModule(ctx context.Context, moduleName string, agentID *string, tagID *int64) (int64, error) {
 	query := `INSERT INTO module_assignments (module_name, agent_id, tag_id) VALUES (?, ?, ?)`
 	result, err := s.db.ExecContext(ctx, query, moduleName, agentID, tagID)
 	if err != nil {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+			return 0, ErrDuplicate
+		}
 		return 0, err
 	}
 	id, err := result.LastInsertId()

@@ -536,6 +536,10 @@ func (s *Server) handleCreateAssignment(w http.ResponseWriter, r *http.Request) 
 	}
 
 	assignmentID, err := s.store.AssignModule(ctx, req.ModuleName, req.AgentID, req.TagID)
+	if errors.Is(err, db.ErrDuplicate) {
+		http.Error(w, "module already assigned", http.StatusConflict)
+		return
+	}
 	if err != nil {
 		slog.Error("failed to assign module", "module_name", req.ModuleName, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

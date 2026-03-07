@@ -8,6 +8,9 @@ import (
 // ErrNotFound is returned when a requested entity is not found.
 var ErrNotFound = errors.New("not found")
 
+// ErrDuplicate is returned when an operation would create a duplicate entry.
+var ErrDuplicate = errors.New("duplicate")
+
 // Agent represents a single agent that checks in with the server.
 type Agent struct {
 	ID          string // UUID of the agent

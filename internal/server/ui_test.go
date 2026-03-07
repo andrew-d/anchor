@@ -931,6 +931,63 @@ func TestCreateAssignmentWithTagID(t *testing.T) {
 	}
 }
 
+// TestCreateAssignmentDuplicate tests POST /api/assignments returns 409 Conflict for duplicate assignments.
+func TestCreateAssignmentDuplicate(t *testing.T) {
+	t.Parallel()
+	s, store, _ := newTestServer(t)
+
+	ctx := context.Background()
+	now := time.Now().Unix()
+
+	agent := db.Agent{
+		ID:         "agent-dup-1",
+		Hostname:   "test-agent",
+		RemoteIP:   "10.0.0.1",
+		OS:         "linux",
+		Arch:       "amd64",
+		Distro:     "ubuntu-24.04",
+		LastSeenAt: now,
+	}
+	if err := store.UpsertAgent(ctx, agent); err != nil {
+		t.Fatalf("Failed to upsert agent: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/assignments", s.handleCreateAssignment)
+
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	agentID := "agent-dup-1"
+	createReq := CreateAssignmentRequest{
+		ModuleName: "00_base",
+		AgentID:    &agentID,
+		TagID:      nil,
+	}
+	body, _ := json.Marshal(createReq)
+
+	// First assignment should succeed
+	resp, err := http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Failed to create assignment: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Expected status %d for first assignment, got %d", http.StatusCreated, resp.StatusCode)
+	}
+
+	// Duplicate assignment should return 409 Conflict
+	body, _ = json.Marshal(createReq)
+	resp, err = http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Failed to make duplicate request: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("Expected status %d for duplicate assignment, got %d", http.StatusConflict, resp.StatusCode)
+	}
+}
+
 // TestCreateAssignmentBothAgentAndTag tests POST /api/assignments with both agent_id and tag_id returns 400.
 func TestCreateAssignmentBothAgentAndTag(t *testing.T) {
 	t.Parallel()
