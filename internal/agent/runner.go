@@ -12,6 +12,50 @@ import (
 	"github.com/andrew-d/anchor/internal/copyfile"
 )
 
+const (
+	// maxOutputBytes is the maximum number of bytes captured per output
+	// stream (stdout/stderr). This prevents a misbehaving module from
+	// consuming unbounded memory. 512KB leaves room for JSON overhead
+	// within the server's 1MB request body limit.
+	maxOutputBytes = 512 * 1024
+
+	truncationMarker = "\n... (output truncated)\n"
+)
+
+// limitedWriter wraps a bytes.Buffer and stops writing after a byte limit.
+type limitedWriter struct {
+	buf       bytes.Buffer
+	remaining int
+	truncated bool
+}
+
+func newLimitedWriter(limit int) *limitedWriter {
+	return &limitedWriter{remaining: limit - len(truncationMarker)}
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	if w.remaining <= 0 {
+		w.truncated = true
+		return len(p), nil
+	}
+	if len(p) > w.remaining {
+		w.buf.Write(p[:w.remaining])
+		w.remaining = 0
+		w.truncated = true
+		return len(p), nil
+	}
+	w.buf.Write(p)
+	w.remaining -= len(p)
+	return len(p), nil
+}
+
+func (w *limitedWriter) String() string {
+	if w.truncated {
+		return w.buf.String() + truncationMarker
+	}
+	return w.buf.String()
+}
+
 // Module represents a module to be executed.
 type Module struct {
 	Name   string
@@ -110,9 +154,10 @@ func runModule(ctx context.Context, runDir string, name string, script string, a
 	scriptPath := filepath.Join(tmpDir, name)
 	cmd := exec.CommandContext(ctx, scriptPath, "apply")
 	cmd.Dir = filesDir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newLimitedWriter(maxOutputBytes)
+	stderr := newLimitedWriter(maxOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	// Run and capture exit code
 	err = cmd.Run()

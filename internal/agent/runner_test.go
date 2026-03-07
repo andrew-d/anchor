@@ -243,6 +243,53 @@ func TestRunModuleRejectsPathTraversalInModuleName(t *testing.T) {
 	}
 }
 
+func TestRunModuleOutputTruncation(t *testing.T) {
+	// Generate a script that outputs more than maxOutputBytes on both stdout and stderr.
+	// Use head -c to write 600KB (> 512KB limit) of zeros to each stream.
+	script := `#!/bin/sh
+head -c 614400 /dev/zero
+head -c 614400 /dev/zero >&2
+exit 0
+`
+	result := runModule(t.Context(), t.TempDir(), "test_truncation", script, nil)
+
+	if result.Status != "ok" {
+		t.Fatalf("Status: got %q, want %q\nStderr: %s", result.Status, "ok", result.Stderr)
+	}
+
+	if len(result.Stdout) > maxOutputBytes {
+		t.Errorf("Stdout length %d exceeds maxOutputBytes %d", len(result.Stdout), maxOutputBytes)
+	}
+	if !strings.HasSuffix(result.Stdout, "\n... (output truncated)\n") {
+		t.Errorf("Stdout missing truncation marker, ends with: %q", result.Stdout[len(result.Stdout)-40:])
+	}
+
+	if len(result.Stderr) > maxOutputBytes {
+		t.Errorf("Stderr length %d exceeds maxOutputBytes %d", len(result.Stderr), maxOutputBytes)
+	}
+	if !strings.HasSuffix(result.Stderr, "\n... (output truncated)\n") {
+		t.Errorf("Stderr missing truncation marker, ends with: %q", result.Stderr[len(result.Stderr)-40:])
+	}
+}
+
+func TestRunModuleOutputUnderLimit(t *testing.T) {
+	script := `#!/bin/sh
+echo "short output"
+exit 0
+`
+	result := runModule(t.Context(), t.TempDir(), "test_under_limit", script, nil)
+
+	if result.Status != "ok" {
+		t.Fatalf("Status: got %q, want %q", result.Status, "ok")
+	}
+	if result.Stdout != "short output\n" {
+		t.Errorf("Stdout: got %q, want %q", result.Stdout, "short output\n")
+	}
+	if strings.Contains(result.Stdout, "truncated") {
+		t.Error("Stdout should not contain truncation marker for small output")
+	}
+}
+
 func TestModuleExecutionOrdering(t *testing.T) {
 	modules := []Module{
 		{"10_users", "#!/bin/sh\nexit 0\n"},
