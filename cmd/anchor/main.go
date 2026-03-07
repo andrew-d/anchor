@@ -55,7 +55,7 @@ func runServer(args []string) int {
 	}
 	defaultDataDir := envOrDefault("STATE_DIRECTORY", "/var/lib/anchor-server")
 
-	fs := flag.NewFlagSet("server", flag.ExitOnError)
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
 	port := fs.Int("port", 8080, "HTTP listen port")
 	modulesDir := fs.String("modules-dir", defaultModulesDir, "directory containing module scripts")
 	dataDir := fs.String("data-dir", defaultDataDir, "directory for persistent data (e.g. SQLite database)")
@@ -83,7 +83,7 @@ func runServer(args []string) int {
 func runAgent(args []string) int {
 	defaultDataDir := envOrDefault("STATE_DIRECTORY", "/var/lib/anchor")
 
-	fs := flag.NewFlagSet("agent", flag.ExitOnError)
+	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	serverURL := fs.String("server", "", "server URL")
 	dataDir := fs.String("data-dir", defaultDataDir, "directory for persistent data")
 	if err := fs.Parse(args); err != nil {
