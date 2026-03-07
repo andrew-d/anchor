@@ -1,46 +1,38 @@
-//go:build unix
-
 package copyfile
 
 import (
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
-	"sync"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
-var logReflink sync.Once
+// tryReflink, if non-nil, attempts a reflink clone from src to dst.
+// Returns true if the reflink succeeded and no further copying is needed.
+// Set by platform-specific init() on Linux.
+var tryReflink func(dst, src *os.File) bool
 
-// Clone copies file data from src to dst using open file descriptors. It tries
-// a FICLONE reflink first for instant copy-on-write, falling back to io.Copy
-// (which uses copy_file_range internally). Both files must already be open.
+// copyOwnership, if non-nil, copies uid/gid from srcInfo to the open dst file.
+// Set by platform-specific init() on Linux.
+var copyOwnership func(dst *os.File, srcInfo os.FileInfo) error
+
+// Clone copies file data from src to dst using open file descriptors.
+// On Linux it tries a FICLONE reflink first for instant copy-on-write,
+// falling back to io.Copy (which uses copy_file_range internally).
+// On other platforms it uses io.Copy directly.
 func Clone(dst, src *os.File) error {
-	err := unix.IoctlSetInt(int(dst.Fd()), unix.FICLONE, int(src.Fd()))
-	if err == nil {
-		logReflink.Do(func() {
-			slog.Debug("FICLONE reflink supported")
-		})
+	if tryReflink != nil && tryReflink(dst, src) {
 		return nil
 	}
-	logReflink.Do(func() {
-		slog.Debug("FICLONE reflink not supported, using fallback copy", "error", err)
-	})
 	if _, err := io.Copy(dst, src); err != nil {
 		return fmt.Errorf("copy data: %w", err)
 	}
 	return nil
 }
 
-// CopyFile copies the file at src to dst. It tries a FICLONE reflink first
-// for instant copy-on-write, falling back to io.Copy (which uses
-// copy_file_range internally). After copying data, it copies the file mode
-// and modification time. Ownership (uid/gid) is copied on a best-effort
-// basis — failure is silently ignored.
+// CopyFile copies the file at src to dst, preserving mode and modification
+// time. On Linux it also attempts FICLONE reflinks and preserves file
+// ownership (uid/gid) on a best-effort basis.
 func CopyFile(src, dst string) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
@@ -62,14 +54,19 @@ func CopyFile(src, dst string) error {
 	if err := Clone(dstFile, srcFile); err != nil {
 		return err
 	}
-	srcFile.Close()
+	if err := srcFile.Close(); err != nil {
+		return err
+	}
 
 	// Set metadata via the open file descriptor.
 	if err := dstFile.Chmod(srcInfo.Mode()); err != nil {
 		return fmt.Errorf("chmod: %w", err)
 	}
-	stat := srcInfo.Sys().(*syscall.Stat_t)
-	_ = dstFile.Chown(int(stat.Uid), int(stat.Gid)) // best-effort
+	if copyOwnership != nil {
+		if err := copyOwnership(dstFile, srcInfo); err != nil {
+			// best effort
+		}
+	}
 	if err := dstFile.Close(); err != nil {
 		return fmt.Errorf("close destination: %w", err)
 	}
