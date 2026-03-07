@@ -1468,3 +1468,55 @@ func TestComputeHealthPriority(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateTagTrimsWhitespace(t *testing.T) {
+	t.Parallel()
+	s, _, _ := newTestServer(t)
+
+	body := `{"name":"  webservers  "}`
+	req := httptest.NewRequest("POST", "/api/tags", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	s.handleCreateTag(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	var resp UITagResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Name != "webservers" {
+		t.Errorf("Name = %q, want %q", resp.Name, "webservers")
+	}
+}
+
+func TestSetAgentDisplayNameTrimsWhitespace(t *testing.T) {
+	t.Parallel()
+	s, store, _ := newTestServer(t)
+	ctx := context.Background()
+
+	// Create an agent first
+	if err := store.UpsertAgent(ctx, db.Agent{ID: "agent-trim", Hostname: "h"}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"display_name":"  My Server  "}`
+	req := httptest.NewRequest("PUT", "/api/agents/agent-trim/name", bytes.NewBufferString(body))
+	req.SetPathValue("id", "agent-trim")
+	rec := httptest.NewRecorder()
+	s.handleSetAgentDisplayName(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	// Verify stored value is trimmed
+	agent, err := store.GetAgent(ctx, "agent-trim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.DisplayName == nil || *agent.DisplayName != "My Server" {
+		t.Errorf("DisplayName = %v, want %q", agent.DisplayName, "My Server")
+	}
+}

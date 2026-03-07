@@ -333,7 +333,8 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate tag name is not empty
-	if strings.TrimSpace(req.Name) == "" {
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
 		http.Error(w, "tag name cannot be empty", http.StatusBadRequest)
 		return
 	}
@@ -436,9 +437,13 @@ func (s *Server) handleSetAgentDisplayName(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.DisplayName != nil && strings.TrimSpace(*req.DisplayName) == "" {
-		http.Error(w, "display name cannot be empty", http.StatusBadRequest)
-		return
+	if req.DisplayName != nil {
+		trimmed := strings.TrimSpace(*req.DisplayName)
+		if trimmed == "" {
+			http.Error(w, "display name cannot be empty", http.StatusBadRequest)
+			return
+		}
+		req.DisplayName = &trimmed
 	}
 
 	if err := s.store.SetAgentDisplayName(ctx, agentID, req.DisplayName); err != nil {
