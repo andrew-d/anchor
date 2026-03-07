@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/andrew-d/anchor/internal/api"
 )
 
 // handlerTransport is an http.RoundTripper that calls an http.Handler
@@ -142,9 +144,9 @@ func TestAgentPollingLoop_CheckinServerError(t *testing.T) {
 					http.Error(w, "database is locked", http.StatusInternalServerError)
 					return
 				}
-				resp := CheckinResponse{
+				resp := api.CheckinResponse{
 					PollIntervalSeconds: 300,
-					Modules:             []CheckinModule{},
+					Modules:             []api.CheckinModule{},
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(resp)
@@ -181,9 +183,9 @@ func TestAgentPollingLoop_ReportsModulesIndividually(t *testing.T) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/checkin" && r.Method == "POST" {
 				checkinCount++
-				resp := CheckinResponse{
+				resp := api.CheckinResponse{
 					PollIntervalSeconds: 300,
-					Modules: []CheckinModule{
+					Modules: []api.CheckinModule{
 						{Name: "02_pkg", Script: "#!/bin/sh\necho 'install packages'\nexit 0"},
 						{Name: "01_base", Script: "#!/bin/sh\necho 'configure base'\nexit 0"},
 					},
@@ -192,11 +194,11 @@ func TestAgentPollingLoop_ReportsModulesIndividually(t *testing.T) {
 				json.NewEncoder(w).Encode(resp)
 			} else if r.URL.Path == "/api/report" && r.Method == "POST" {
 				reportCount++
-				var req ReportRequest
+				var req api.ReportRequest
 				json.NewDecoder(r.Body).Decode(&req)
 				reportedModules = append(reportedModules, req.ModuleName)
 
-				resp := ReportResponse{OK: true}
+				resp := api.ReportResponse{OK: true}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(resp)
 			} else {
@@ -244,9 +246,9 @@ func TestAgentPollingLoop_StopsOnReportFailure(t *testing.T) {
 
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/checkin" && r.Method == "POST" {
-				resp := CheckinResponse{
+				resp := api.CheckinResponse{
 					PollIntervalSeconds: 300,
-					Modules: []CheckinModule{
+					Modules: []api.CheckinModule{
 						{Name: "01_first", Script: "#!/bin/sh\necho 'first'\nexit 0"},
 						{Name: "02_second", Script: "#!/bin/sh\necho 'second'\nexit 0"},
 						{Name: "03_third", Script: "#!/bin/sh\necho 'third'\nexit 0"},
@@ -256,7 +258,7 @@ func TestAgentPollingLoop_StopsOnReportFailure(t *testing.T) {
 				json.NewEncoder(w).Encode(resp)
 			} else if r.URL.Path == "/api/report" && r.Method == "POST" {
 				reportCount++
-				var req ReportRequest
+				var req api.ReportRequest
 				json.NewDecoder(r.Body).Decode(&req)
 				reportedModules = append(reportedModules, req.ModuleName)
 
@@ -266,7 +268,7 @@ func TestAgentPollingLoop_StopsOnReportFailure(t *testing.T) {
 					return
 				}
 
-				resp := ReportResponse{OK: true}
+				resp := api.ReportResponse{OK: true}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(resp)
 			} else {

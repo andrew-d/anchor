@@ -8,53 +8,9 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/andrew-d/anchor/internal/api"
 	"github.com/andrew-d/anchor/internal/db"
 )
-
-// CheckinRequest is the JSON body of POST /api/checkin.
-type CheckinRequest struct {
-	ID       string `json:"id"`
-	Hostname string `json:"hostname"`
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	Distro   string `json:"distro"`
-}
-
-// CheckinResponse is the JSON response from POST /api/checkin.
-type CheckinResponse struct {
-	PollIntervalSeconds int             `json:"poll_interval_seconds"`
-	Modules             []CheckinModule `json:"modules"`
-}
-
-// CheckinModule is a module entry in the checkin response.
-type CheckinModule struct {
-	Name      string            `json:"name"`
-	Script    string            `json:"script"`
-	Artifacts []CheckinArtifact `json:"artifacts,omitempty"`
-}
-
-// CheckinArtifact describes a file artifact associated with a module.
-type CheckinArtifact struct {
-	RelPath string `json:"rel_path"`
-	Hash    string `json:"hash"`
-	Size    int64  `json:"size"`
-	Mode    uint32 `json:"mode"`
-}
-
-// ReportRequest is the JSON body of POST /api/report.
-type ReportRequest struct {
-	AgentID    string `json:"agent_id"`
-	ModuleName string `json:"module_name"`
-	Status     string `json:"status"`
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	ExecutedAt int64  `json:"executed_at"`
-}
-
-// ReportResponse is the JSON response from POST /api/report.
-type ReportResponse struct {
-	OK bool `json:"ok"`
-}
 
 // handleCheckin handles POST /api/checkin requests.
 // Implemented in Task 3.
@@ -63,7 +19,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	// Decode JSON request body
-	var req CheckinRequest
+	var req api.CheckinRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.Warn("checkin request decode error", "error", err)
 		http.Error(w, "malformed JSON", http.StatusBadRequest)
@@ -116,12 +72,12 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build response modules by matching assigned names against loaded modules
-	modules := make([]CheckinModule, 0)
+	modules := make([]api.CheckinModule, 0)
 	for _, name := range assignedNames {
 		if mod, ok := s.loader.GetModule(name); ok {
-			cm := CheckinModule{Name: name, Script: mod.Script}
+			cm := api.CheckinModule{Name: name, Script: mod.Script}
 			for _, art := range mod.Artifacts {
-				cm.Artifacts = append(cm.Artifacts, CheckinArtifact{
+				cm.Artifacts = append(cm.Artifacts, api.CheckinArtifact{
 					RelPath: art.RelPath,
 					Hash:    art.Hash,
 					Size:    art.Size,
@@ -133,7 +89,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return JSON response
-	resp := CheckinResponse{
+	resp := api.CheckinResponse{
 		PollIntervalSeconds: s.opts.PollInterval,
 		Modules:             modules,
 	}
@@ -151,7 +107,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	// Decode JSON request body
-	var req ReportRequest
+	var req api.ReportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.Warn("report request decode error", "error", err)
 		http.Error(w, "malformed JSON", http.StatusBadRequest)
@@ -201,7 +157,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return success response
-	resp := ReportResponse{OK: true}
+	resp := api.ReportResponse{OK: true}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("failed to encode report response", "error", err)

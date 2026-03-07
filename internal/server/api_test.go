@@ -13,6 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/andrew-d/anchor/internal/api"
 	"github.com/andrew-d/anchor/internal/db"
 	"github.com/andrew-d/anchor/internal/module"
 )
@@ -91,7 +92,7 @@ func TestCheckinNewAgent(t *testing.T) {
 	defer ts.Close()
 
 	// Make checkin request
-	reqBody := CheckinRequest{
+	reqBody := api.CheckinRequest{
 		ID:       "agent-uuid-123",
 		Hostname: "web-server-1",
 		OS:       "linux",
@@ -146,7 +147,7 @@ func TestCheckinUpdateAgent(t *testing.T) {
 		s, store, _ := newTestServer(t)
 
 		// First check-in
-		reqBody1 := CheckinRequest{
+		reqBody1 := api.CheckinRequest{
 			ID:       "agent-uuid-456",
 			Hostname: "web-server-1",
 			OS:       "linux",
@@ -195,7 +196,7 @@ func TestCheckinChangedHostname(t *testing.T) {
 	defer ts.Close()
 
 	// First check-in with hostname1
-	reqBody1 := CheckinRequest{
+	reqBody1 := api.CheckinRequest{
 		ID:       "agent-uuid-789",
 		Hostname: "web-server-old",
 		OS:       "linux",
@@ -215,7 +216,7 @@ func TestCheckinChangedHostname(t *testing.T) {
 	}
 
 	// Second check-in with changed hostname
-	reqBody2 := CheckinRequest{
+	reqBody2 := api.CheckinRequest{
 		ID:       "agent-uuid-789",
 		Hostname: "web-server-new",
 		OS:       "linux",
@@ -271,7 +272,7 @@ func TestCheckinWithModules(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
 	defer ts.Close()
 
-	reqBody := CheckinRequest{
+	reqBody := api.CheckinRequest{
 		ID:       "agent-uuid-mod1",
 		Hostname: "test-host",
 		OS:       "linux",
@@ -286,7 +287,7 @@ func TestCheckinWithModules(t *testing.T) {
 	defer resp.Body.Close()
 
 	// Decode response
-	var respBody CheckinResponse
+	var respBody api.CheckinResponse
 	json.NewDecoder(resp.Body).Decode(&respBody)
 
 	if len(respBody.Modules) != 1 {
@@ -320,7 +321,7 @@ func TestReport(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleReport))
 	defer ts.Close()
 
-	reqBody := ReportRequest{
+	reqBody := api.ReportRequest{
 		AgentID:    "agent-uuid-report1",
 		ModuleName: "test_module",
 		Status:     "ok",
@@ -371,7 +372,7 @@ func TestReportMultipleResults(t *testing.T) {
 		}
 
 		// Report same module twice
-		reqBody1 := ReportRequest{
+		reqBody1 := api.ReportRequest{
 			AgentID:    "agent-uuid-multi",
 			ModuleName: "test_module",
 			Status:     "ok",
@@ -390,7 +391,7 @@ func TestReportMultipleResults(t *testing.T) {
 
 		time.Sleep(10 * time.Millisecond)
 
-		reqBody2 := ReportRequest{
+		reqBody2 := api.ReportRequest{
 			AgentID:    "agent-uuid-multi",
 			ModuleName: "test_module",
 			Status:     "changed",
@@ -466,7 +467,7 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
 	defer ts.Close()
 
-	reqBody := CheckinRequest{
+	reqBody := api.CheckinRequest{
 		ID:       "agent-uuid-tag",
 		Hostname: "test-host",
 		OS:       "linux",
@@ -480,7 +481,7 @@ func TestCheckinWithDirectAndTagModules(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var respBody CheckinResponse
+	var respBody api.CheckinResponse
 	json.NewDecoder(resp.Body).Decode(&respBody)
 
 	if len(respBody.Modules) != 2 {
@@ -554,7 +555,7 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
 	defer ts.Close()
 
-	reqBody := CheckinRequest{
+	reqBody := api.CheckinRequest{
 		ID:       "agent-uuid-dedup",
 		Hostname: "test-host",
 		OS:       "linux",
@@ -568,7 +569,7 @@ func TestCheckinDeduplicateTagModules(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var respBody CheckinResponse
+	var respBody api.CheckinResponse
 	json.NewDecoder(resp.Body).Decode(&respBody)
 
 	if len(respBody.Modules) != 1 {
@@ -608,7 +609,7 @@ func TestCheckinMissingID(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleCheckin))
 	defer ts.Close()
 
-	reqBody := CheckinRequest{
+	reqBody := api.CheckinRequest{
 		Hostname: "test-host",
 		OS:       "linux",
 		Arch:     "amd64",
@@ -634,7 +635,7 @@ func TestReportInvalidStatus(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleReport))
 	defer ts.Close()
 
-	reqBody := ReportRequest{
+	reqBody := api.ReportRequest{
 		AgentID:    "agent-uuid",
 		ModuleName: "test_module",
 		Status:     "invalid_status",
@@ -859,7 +860,7 @@ func TestCheckinWithArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reqBody := CheckinRequest{
+	reqBody := api.CheckinRequest{
 		ID:       "agent-art-1",
 		Hostname: "test-host",
 		OS:       "linux",
@@ -876,7 +877,7 @@ func TestCheckinWithArtifacts(t *testing.T) {
 		t.Fatalf("Expected status 200, got %d", rec.Code)
 	}
 
-	var resp CheckinResponse
+	var resp api.CheckinResponse
 	json.NewDecoder(rec.Body).Decode(&resp)
 
 	if len(resp.Modules) != 1 {
