@@ -67,6 +67,22 @@ function formatTime(unixSeconds) {
     return { local: d.toLocaleString(), utc: d.toUTCString() };
 }
 
+// --- Reusable Components ---
+
+function ErrorBanner({ message, onDismiss }) {
+    useEffect(() => {
+        const id = setTimeout(onDismiss, 5000);
+        return () => clearTimeout(id);
+    }, [message]);
+
+    return html`
+        <div class="error-banner">
+            <span>${message}</span>
+            <button onClick=${onDismiss} class="error-banner-dismiss">✕</button>
+        </div>
+    `;
+}
+
 // --- Components (Dashboard, AgentDetail) ---
 
 function Dashboard() {
@@ -117,6 +133,7 @@ function Dashboard() {
 function AgentDetail({ id }) {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
+    const [actionError, setActionError] = useState(null);
     const [expanded, setExpanded] = useState({});
     const [allTags, setAllTags] = useState([]);
     const [effectiveModules, setEffectiveModules] = useState([]);
@@ -159,7 +176,7 @@ function AgentDetail({ id }) {
             const modules = await fetchJSON(`/api/agents/${id}/modules`);
             setEffectiveModules(modules.modules || []);
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         } finally {
             setIsAdding(false);
         }
@@ -175,7 +192,7 @@ function AgentDetail({ id }) {
             const modules = await fetchJSON(`/api/agents/${id}/modules`);
             setEffectiveModules(modules.modules || []);
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         }
     };
 
@@ -189,7 +206,7 @@ function AgentDetail({ id }) {
             const modules = await fetchJSON(`/api/agents/${id}/modules`);
             setEffectiveModules(modules.modules || []);
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         } finally {
             setIsAdding(false);
         }
@@ -202,7 +219,7 @@ function AgentDetail({ id }) {
             const modules = await fetchJSON(`/api/agents/${id}/modules`);
             setEffectiveModules(modules.modules || []);
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         }
     };
 
@@ -214,7 +231,7 @@ function AgentDetail({ id }) {
             setData(updatedData);
             setEditingName(false);
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         }
     };
 
@@ -230,6 +247,7 @@ function AgentDetail({ id }) {
     return html`
         <div class="container">
             <p><a href="#/">← Dashboard</a></p>
+            ${actionError && html`<${ErrorBanner} message=${actionError} onDismiss=${() => setActionError(null)} />`}
             <h2>${agent.display_name || agent.hostname}</h2>
             <div class="agent-name-edit">
                 ${editingName ? html`
@@ -328,6 +346,7 @@ function AgentDetail({ id }) {
 function Tags() {
     const [tags, setTags] = useState(null);
     const [error, setError] = useState(null);
+    const [actionError, setActionError] = useState(null);
     const [newTagName, setNewTagName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
 
@@ -350,7 +369,7 @@ function Tags() {
             setNewTagName('');
             loadTags();
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         } finally {
             setIsCreating(false);
         }
@@ -362,7 +381,7 @@ function Tags() {
             await deleteJSON(`/api/tags/${id}`);
             loadTags();
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         }
     };
 
@@ -372,6 +391,7 @@ function Tags() {
     return html`
         <div class="container">
             <p><a href="#/">← Dashboard</a></p>
+            ${actionError && html`<${ErrorBanner} message=${actionError} onDismiss=${() => setActionError(null)} />`}
             <h2>Tags</h2>
 
             <div class="form-section">
@@ -407,6 +427,7 @@ function TagDetail({ id }) {
     const [assignments, setAssignments] = useState([]);
     const [modules, setModules] = useState([]);
     const [error, setError] = useState(null);
+    const [actionError, setActionError] = useState(null);
     const [selectedModule, setSelectedModule] = useState('');
     const [isAdding, setIsAdding] = useState(false);
 
@@ -433,7 +454,7 @@ function TagDetail({ id }) {
             const data = await fetchJSON('/api/assignments');
             setAssignments((data.assignments || []).filter(a => a.tag_id === parseInt(id)));
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         } finally {
             setIsAdding(false);
         }
@@ -445,7 +466,7 @@ function TagDetail({ id }) {
             await deleteJSON(`/api/assignments/${assignmentId}`);
             setAssignments(assignments.filter(a => a.id !== assignmentId));
         } catch (e) {
-            setError(e.message);
+            setActionError(e.message);
         }
     };
 
@@ -455,6 +476,7 @@ function TagDetail({ id }) {
     return html`
         <div class="container">
             <p><a href="#/tags">← Tags</a></p>
+            ${actionError && html`<${ErrorBanner} message=${actionError} onDismiss=${() => setActionError(null)} />`}
             <h2>${tag.name}</h2>
 
             <h3>Modules</h3>
