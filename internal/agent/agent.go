@@ -228,7 +228,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		modules = SortModules(modules)
 
-		// Execute each module and report results
+		// Execute each module, audit, and report results
+		auditLog := newAuditLog(filepath.Join(a.dataDir, "audit.log"))
 		reportFailed := false
 		for _, mod := range modules {
 			if ctx.Err() != nil {
@@ -237,6 +238,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 			// Execute module
 			moduleResult := runModule(ctx, runDir, mod.Name, mod.Script, moduleArtifacts[mod.Name])
+			auditLog.log(mod.Name, mod.Script, moduleResult.Status)
 			slog.Info("module executed", "module", mod.Name, "status", moduleResult.Status)
 
 			// Build report request
