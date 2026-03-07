@@ -75,15 +75,15 @@ type UIModuleResultResponse struct {
 // - "stale": hasn't checked in within 2x poll interval
 // - "healthy": checked in recently and no errors
 func (s *Server) computeHealth(agent *UIAgentResponse, now int64, staleThreshold int64) {
-	// Check if stale
-	if agent.LastSeenAt < now-staleThreshold {
-		agent.Health = "stale"
+	// Check if unhealthy first — errors should not be masked by staleness.
+	if agent.ErrorCount > 0 {
+		agent.Health = "unhealthy"
 		return
 	}
 
-	// Check if unhealthy (has error)
-	if agent.ErrorCount > 0 {
-		agent.Health = "unhealthy"
+	// Check if stale
+	if agent.LastSeenAt < now-staleThreshold {
+		agent.Health = "stale"
 		return
 	}
 

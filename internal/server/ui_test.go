@@ -1424,3 +1424,47 @@ func TestListAgentsIncludesDisplayName(t *testing.T) {
 		t.Errorf("Expected display_name 'Custom Name', got %v", agentResp.DisplayName)
 	}
 }
+
+func TestComputeHealthPriority(t *testing.T) {
+	t.Parallel()
+	s := &Server{opts: Options{PollInterval: 300}}
+	now := int64(1000)
+	staleThreshold := int64(600) // 2x poll interval
+
+	tests := []struct {
+		name       string
+		agent      UIAgentResponse
+		wantHealth string
+	}{
+		{
+			name:       "healthy",
+			agent:      UIAgentResponse{LastSeenAt: now, ErrorCount: 0},
+			wantHealth: "healthy",
+		},
+		{
+			name:       "unhealthy_only",
+			agent:      UIAgentResponse{LastSeenAt: now, ErrorCount: 1},
+			wantHealth: "unhealthy",
+		},
+		{
+			name:       "stale_only",
+			agent:      UIAgentResponse{LastSeenAt: now - staleThreshold - 1, ErrorCount: 0},
+			wantHealth: "stale",
+		},
+		{
+			name:       "stale_and_unhealthy",
+			agent:      UIAgentResponse{LastSeenAt: now - staleThreshold - 1, ErrorCount: 2},
+			wantHealth: "unhealthy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := tt.agent
+			s.computeHealth(&agent, now, staleThreshold)
+			if agent.Health != tt.wantHealth {
+				t.Errorf("Health = %q, want %q", agent.Health, tt.wantHealth)
+			}
+		})
+	}
+}
