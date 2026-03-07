@@ -99,7 +99,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := s.store.ListAgents(ctx)
 	if err != nil {
 		slog.Error("failed to list agents", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		moduleResults, err := s.store.GetLatestModuleResults(ctx, agent.ID)
 		if err != nil {
 			slog.Error("failed to get module results", "agent_id", agent.ID, "error", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			jsonError(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -130,7 +130,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		tags, err := s.store.GetAgentTags(ctx, agent.ID)
 		if err != nil {
 			slog.Error("failed to get agent tags", "agent_id", agent.ID, "error", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			jsonError(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -182,11 +182,11 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			slog.Debug("agent not found", "agent_id", agentID, "error", err)
-			http.Error(w, "not found", http.StatusNotFound)
+			jsonError(w, "not found", http.StatusNotFound)
 			return
 		}
 		slog.Error("failed to get agent", "agent_id", agentID, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -194,7 +194,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	moduleResults, err := s.store.GetLatestModuleResults(ctx, agentID)
 	if err != nil {
 		slog.Error("failed to get module results", "agent_id", agentID, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -202,7 +202,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	tags, err := s.store.GetAgentTags(ctx, agentID)
 	if err != nil {
 		slog.Error("failed to get agent tags", "agent_id", agentID, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -299,7 +299,7 @@ func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
 	tags, err := s.store.ListTags(ctx)
 	if err != nil {
 		slog.Error("failed to list tags", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -328,21 +328,21 @@ func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req CreateTagRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	// Validate tag name is not empty
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		http.Error(w, "tag name cannot be empty", http.StatusBadRequest)
+		jsonError(w, "tag name cannot be empty", http.StatusBadRequest)
 		return
 	}
 
 	tag, err := s.store.CreateTag(ctx, req.Name)
 	if err != nil {
 		slog.Error("failed to create tag", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -365,14 +365,14 @@ func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid tag id", http.StatusBadRequest)
+		jsonError(w, "invalid tag id", http.StatusBadRequest)
 		return
 	}
 
 	err = s.store.DeleteTag(ctx, id)
 	if err != nil {
 		slog.Error("failed to delete tag", "tag_id", id, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -399,14 +399,14 @@ func (s *Server) handleSetAgentTags(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SetAgentTagsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	err := s.store.SetAgentTags(ctx, agentID, req.TagIDs)
 	if err != nil {
 		slog.Error("failed to set agent tags", "agent_id", agentID, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -433,14 +433,14 @@ func (s *Server) handleSetAgentDisplayName(w http.ResponseWriter, r *http.Reques
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req SetDisplayNameRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.DisplayName != nil {
 		trimmed := strings.TrimSpace(*req.DisplayName)
 		if trimmed == "" {
-			http.Error(w, "display name cannot be empty", http.StatusBadRequest)
+			jsonError(w, "display name cannot be empty", http.StatusBadRequest)
 			return
 		}
 		req.DisplayName = &trimmed
@@ -448,7 +448,7 @@ func (s *Server) handleSetAgentDisplayName(w http.ResponseWriter, r *http.Reques
 
 	if err := s.store.SetAgentDisplayName(ctx, agentID, req.DisplayName); err != nil {
 		slog.Error("failed to set agent display name", "agent_id", agentID, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -488,7 +488,7 @@ func (s *Server) handleListAssignments(w http.ResponseWriter, r *http.Request) {
 	assignments, err := s.store.ListAssignments(ctx)
 	if err != nil {
 		slog.Error("failed to list assignments", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -519,30 +519,30 @@ func (s *Server) handleCreateAssignment(w http.ResponseWriter, r *http.Request) 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req CreateAssignmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	// Validate exactly one of agentID or tagID is set
 	if (req.AgentID == nil && req.TagID == nil) || (req.AgentID != nil && req.TagID != nil) {
-		http.Error(w, "exactly one of agent_id or tag_id must be set", http.StatusBadRequest)
+		jsonError(w, "exactly one of agent_id or tag_id must be set", http.StatusBadRequest)
 		return
 	}
 
 	// Validate module_name is not empty
 	if strings.TrimSpace(req.ModuleName) == "" {
-		http.Error(w, "module_name cannot be empty", http.StatusBadRequest)
+		jsonError(w, "module_name cannot be empty", http.StatusBadRequest)
 		return
 	}
 
 	assignmentID, err := s.store.AssignModule(ctx, req.ModuleName, req.AgentID, req.TagID)
 	if errors.Is(err, db.ErrDuplicate) {
-		http.Error(w, "module already assigned", http.StatusConflict)
+		jsonError(w, "module already assigned", http.StatusConflict)
 		return
 	}
 	if err != nil {
 		slog.Error("failed to assign module", "module_name", req.ModuleName, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -567,14 +567,14 @@ func (s *Server) handleDeleteAssignment(w http.ResponseWriter, r *http.Request) 
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "invalid assignment id", http.StatusBadRequest)
+		jsonError(w, "invalid assignment id", http.StatusBadRequest)
 		return
 	}
 
 	err = s.store.UnassignModule(ctx, id)
 	if err != nil {
 		slog.Error("failed to unassign module", "assignment_id", id, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -608,7 +608,7 @@ func (s *Server) handleGetAgentModules(w http.ResponseWriter, r *http.Request) {
 	moduleDetails, err := s.store.GetAgentModuleDetails(ctx, agentID)
 	if err != nil {
 		slog.Error("failed to get agent module details", "agent_id", agentID, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -651,7 +651,7 @@ func (s *Server) handleListModules(w http.ResponseWriter, r *http.Request) {
 	modules, err := s.loader.LoadAll(r.Context())
 	if err != nil {
 		slog.Error("failed to load modules", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 

@@ -26,13 +26,21 @@ async function fetchJSON(url) {
     return res.json();
 }
 
+async function parseError(res) {
+    try {
+        const body = await res.json();
+        if (body.error) return new Error(body.error);
+    } catch (_) {}
+    return new Error(`${res.status} ${res.statusText}`);
+}
+
 async function postJSON(url, body) {
     const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok) throw await parseError(res);
     return res.json();
 }
 
@@ -42,13 +50,13 @@ async function putJSON(url, body) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok) throw await parseError(res);
     return res.json();
 }
 
 async function deleteJSON(url) {
     const res = await fetch(url, { method: 'DELETE' });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    if (!res.ok) throw await parseError(res);
     return res.json();
 }
 

@@ -22,14 +22,14 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	var req api.CheckinRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.Warn("checkin request decode error", "error", err)
-		http.Error(w, "malformed JSON", http.StatusBadRequest)
+		jsonError(w, "malformed JSON", http.StatusBadRequest)
 		return
 	}
 
 	// Validate required fields
 	if req.ID == "" {
 		slog.Warn("checkin request missing id")
-		http.Error(w, "missing id", http.StatusBadRequest)
+		jsonError(w, "missing id", http.StatusBadRequest)
 		return
 	}
 
@@ -52,7 +52,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.UpsertAgent(r.Context(), agent); err != nil {
 		slog.Error("upsert agent error", "agent_id", req.ID, "error", err)
-		http.Error(w, "server error", http.StatusInternalServerError)
+		jsonError(w, "server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -60,14 +60,14 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	assignedNames, err := s.store.GetAgentModules(r.Context(), req.ID)
 	if err != nil {
 		slog.Error("get agent modules error", "agent_id", req.ID, "error", err)
-		http.Error(w, "server error", http.StatusInternalServerError)
+		jsonError(w, "server error", http.StatusInternalServerError)
 		return
 	}
 
 	// Load current modules
 	if _, err := s.loader.LoadAll(r.Context()); err != nil {
 		slog.Error("load modules error", "error", err)
-		http.Error(w, "server error", http.StatusInternalServerError)
+		jsonError(w, "server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -110,26 +110,26 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	var req api.ReportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.Warn("report request decode error", "error", err)
-		http.Error(w, "malformed JSON", http.StatusBadRequest)
+		jsonError(w, "malformed JSON", http.StatusBadRequest)
 		return
 	}
 
 	// Validate required fields
 	if req.AgentID == "" {
 		slog.Warn("report request missing agent_id")
-		http.Error(w, "missing agent_id", http.StatusBadRequest)
+		jsonError(w, "missing agent_id", http.StatusBadRequest)
 		return
 	}
 
 	if req.ModuleName == "" {
 		slog.Warn("report request missing module_name")
-		http.Error(w, "missing module_name", http.StatusBadRequest)
+		jsonError(w, "missing module_name", http.StatusBadRequest)
 		return
 	}
 
 	if req.Status == "" {
 		slog.Warn("report request missing status")
-		http.Error(w, "missing status", http.StatusBadRequest)
+		jsonError(w, "missing status", http.StatusBadRequest)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	validStatus := req.Status == "ok" || req.Status == "changed" || req.Status == "error"
 	if !validStatus {
 		slog.Warn("report request invalid status", "status", req.Status)
-		http.Error(w, "invalid status", http.StatusBadRequest)
+		jsonError(w, "invalid status", http.StatusBadRequest)
 		return
 	}
 
@@ -152,7 +152,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.InsertModuleResult(r.Context(), result); err != nil {
 		slog.Error("insert module result error", "agent_id", req.AgentID, "module_name", req.ModuleName, "error", err)
-		http.Error(w, "server error", http.StatusInternalServerError)
+		jsonError(w, "server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -170,13 +170,13 @@ var hexHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 func (s *Server) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	hash := r.PathValue("hash")
 	if !hexHashPattern.MatchString(hash) {
-		http.Error(w, "invalid hash", http.StatusBadRequest)
+		jsonError(w, "invalid hash", http.StatusBadRequest)
 		return
 	}
 
 	art, ok := s.loader.GetArtifactByHash(hash)
 	if !ok {
-		http.Error(w, "not found", http.StatusNotFound)
+		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
 

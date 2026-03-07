@@ -976,15 +976,27 @@ func TestCreateAssignmentDuplicate(t *testing.T) {
 		t.Fatalf("Expected status %d for first assignment, got %d", http.StatusCreated, resp.StatusCode)
 	}
 
-	// Duplicate assignment should return 409 Conflict
+	// Duplicate assignment should return 409 Conflict with JSON body
 	body, _ = json.Marshal(createReq)
 	resp, err = http.Post(ts.URL+"/api/assignments", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("Failed to make duplicate request: %v", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("Expected status %d for duplicate assignment, got %d", http.StatusConflict, resp.StatusCode)
+		t.Fatalf("Expected status %d for duplicate assignment, got %d", http.StatusConflict, resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %q", ct)
+	}
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+	if errResp.Error == "" {
+		t.Error("Expected non-empty error message in JSON response")
 	}
 }
 
@@ -1018,7 +1030,19 @@ func TestCreateAssignmentBothAgentAndTag(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %q", ct)
+	}
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+	if errResp.Error == "" {
+		t.Error("Expected non-empty error message in JSON response")
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -160,4 +161,11 @@ func (s *Server) pruneOnce(ctx context.Context) {
 	if deleted > 0 {
 		slog.Info("pruned old module results", "deleted", deleted)
 	}
+}
+
+// jsonError writes a JSON error response with the given status code and message.
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
