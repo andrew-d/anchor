@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -725,6 +726,70 @@ func TestLoadErrors_BrokenArtifactDir(t *testing.T) {
 	}
 	if errors[0].Filename != "10_broken_art" {
 		t.Errorf("expected error for '10_broken_art', got '%s'", errors[0].Filename)
+	}
+}
+
+// TestLoadAllConcurrentDedup verifies that concurrent LoadAll calls are
+// deduplicated via singleflight — only one metadata execution occurs.
+func TestLoadAllConcurrentDedup(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	markerDir := t.TempDir()
+	markerFile := filepath.Join(markerDir, "metadata_marker")
+
+	// Create a module that appends to a marker file on metadata execution
+	script := fmt.Sprintf(`#!/bin/sh
+case "$1" in
+    metadata)
+        echo '{"name": "Base", "description": "Base setup"}'
+        echo "marker" >> "%s"
+        ;;
+    apply)
+        exit 0
+        ;;
+esac
+`, markerFile)
+	if err := os.WriteFile(filepath.Join(dir, "00_base"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	results := make([][]Module, goroutines)
+	errs := make([]error, goroutines)
+
+	for i := range goroutines {
+		go func(idx int) {
+			defer wg.Done()
+			results[idx], errs[idx] = loader.LoadAll(t.Context())
+		}(i)
+	}
+	wg.Wait()
+
+	// All goroutines should succeed with the same correct result
+	for i := range goroutines {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: LoadAll failed: %v", i, errs[i])
+		}
+		if len(results[i]) != 1 {
+			t.Fatalf("goroutine %d: expected 1 module, got %d", i, len(results[i]))
+		}
+		if results[i][0].Filename != "00_base" {
+			t.Fatalf("goroutine %d: expected filename '00_base', got '%s'", i, results[i][0].Filename)
+		}
+	}
+
+	// The metadata script should have executed only once
+	data, err := os.ReadFile(markerFile)
+	if err != nil {
+		t.Fatalf("failed to read marker file: %v", err)
+	}
+	lines := strings.Count(string(data), "\n")
+	if lines != 1 {
+		t.Errorf("expected metadata to execute once, but marker file has %d lines", lines)
 	}
 }
 

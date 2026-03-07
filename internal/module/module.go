@@ -14,6 +14,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Artifact represents a file in a module's .d directory.
@@ -53,7 +55,7 @@ type ModuleError struct {
 // Loader reads module scripts from a directory and caches their metadata.
 type Loader struct {
 	dir      string
-	loadMu   sync.Mutex          // serializes LoadAll calls so concurrent loads don't race
+	group    singleflight.Group  // deduplicates concurrent LoadAll calls
 	mu       sync.Mutex          // protects cache reads/writes
 	cache    map[string]*Module  // keyed by filename
 	errCache map[string]string   // keyed by filename, value is error message
@@ -77,10 +79,17 @@ func NewLoader(dir string) *Loader {
 // File I/O and metadata command execution happen outside the lock; only the
 // final cache swap is synchronized.
 func (l *Loader) LoadAll(ctx context.Context) ([]Module, error) {
-	// Serialize loads so two concurrent callers don't race on the cache.
-	l.loadMu.Lock()
-	defer l.loadMu.Unlock()
+	v, err, _ := l.group.Do("load", func() (any, error) {
+		return l.loadAll(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]Module), nil
+}
 
+// loadAll is the actual implementation called via singleflight.
+func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 	// Snapshot the current cache so we can compare hashes without holding
 	// mu during I/O.
 	l.mu.Lock()
