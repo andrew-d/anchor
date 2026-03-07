@@ -714,7 +714,7 @@ func TestHealthzDBClosed(t *testing.T) {
 	s, store, _ := newTestServer(t)
 
 	// Close the store to simulate a failed database
-	store.(*db.SQLiteStore).Close()
+	store.Close()
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rec := httptest.NewRecorder()

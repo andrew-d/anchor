@@ -54,6 +54,9 @@ type ModuleResult struct {
 
 // Store is the interface for all data persistence operations.
 type Store interface {
+	// Close closes the store and releases any held resources.
+	Close() error
+
 	// Ping verifies the database connection is alive.
 	Ping(ctx context.Context) error
 
