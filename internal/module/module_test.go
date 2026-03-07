@@ -793,6 +793,54 @@ esac
 	}
 }
 
+// TestLoadAllCriticalTrue verifies that a module with "critical": true in its
+// metadata JSON has Critical set to true on the loaded Module.
+func TestLoadAllCriticalTrue(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	script := `#!/bin/sh
+case "$1" in
+    metadata) echo '{"name": "Critical Module", "description": "Must not fail", "critical": true}' ;;
+    apply) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "00_critical"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if !modules[0].Critical {
+		t.Error("expected Critical to be true")
+	}
+}
+
+// TestLoadAllCriticalDefaultFalse verifies that omitting "critical" from
+// metadata JSON defaults to false.
+func TestLoadAllCriticalDefaultFalse(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Critical {
+		t.Error("expected Critical to default to false")
+	}
+}
+
 // TestLoadErrors_SortedByFilename verifies that errors are returned sorted
 // by filename.
 func TestLoadErrors_SortedByFilename(t *testing.T) {

@@ -224,7 +224,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		// Sort modules by name
 		modules := make([]Module, len(checkinResp.Modules))
 		for i, m := range checkinResp.Modules {
-			modules[i] = Module{Name: m.Name, Script: m.Script}
+			modules[i] = Module{Name: m.Name, Script: m.Script, Critical: m.Critical}
 		}
 		modules = SortModules(modules)
 
@@ -272,6 +272,11 @@ func (a *Agent) Run(ctx context.Context) error {
 			if reportResp.StatusCode != http.StatusOK && reportResp.StatusCode != http.StatusCreated {
 				slog.Error("report request returned non-OK status", "status", reportResp.StatusCode, "module", mod.Name)
 				reportFailed = true
+				break
+			}
+
+			if moduleResult.Status == "error" && mod.Critical {
+				slog.Warn("critical module failed, skipping remaining modules", "module", mod.Name)
 				break
 			}
 		}

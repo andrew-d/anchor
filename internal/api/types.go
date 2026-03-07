@@ -20,6 +20,7 @@ type CheckinResponse struct {
 type CheckinModule struct {
 	Name      string            `json:"name"`
 	Script    string            `json:"script"`
+	Critical  bool              `json:"critical,omitempty"`
 	Artifacts []CheckinArtifact `json:"artifacts,omitempty"`
 }
 

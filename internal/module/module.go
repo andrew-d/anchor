@@ -35,6 +35,7 @@ type Module struct {
 	Filename    string     // Canonical identifier (the script filename, e.g., "00_base")
 	Name        string     // Display name from metadata JSON
 	Description string     // Display description from metadata JSON
+	Critical    bool       // If true, failure stops execution of later modules
 	Script      string     // Full script content
 	Artifacts   []Artifact // Associated files from .d directory, sorted by RelPath
 	hash        string     // SHA-256 hex digest of file contents
@@ -44,6 +45,7 @@ type Module struct {
 type Metadata struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Critical    bool   `json:"critical"`
 }
 
 // ModuleError represents a module that failed to load.
@@ -247,6 +249,7 @@ func parseModule(ctx context.Context, filename, scriptContent, hashHex string) (
 		Filename:    filename,
 		Name:        metadata.Name,
 		Description: metadata.Description,
+		Critical:    metadata.Critical,
 		Script:      scriptContent,
 		hash:        hashHex,
 	}

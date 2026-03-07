@@ -58,8 +58,9 @@ func (w *limitedWriter) String() string {
 
 // Module represents a module to be executed.
 type Module struct {
-	Name   string
-	Script string
+	Name     string
+	Script   string
+	Critical bool
 }
 
 // cachedArtifact describes an artifact that has been downloaded to the local cache.

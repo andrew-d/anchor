@@ -290,11 +290,53 @@ exit 0
 	}
 }
 
+func TestCriticalModuleStopsExecution(t *testing.T) {
+	runDir := t.TempDir()
+	markerDir := t.TempDir()
+
+	modules := SortModules([]Module{
+		{Name: "00_critical", Script: "#!/bin/sh\nexit 1\n", Critical: true},
+		{Name: "10_after", Script: "#!/bin/sh\ntouch " + filepath.Join(markerDir, "ran") + "\nexit 0\n"},
+	})
+
+	for _, mod := range modules {
+		result := runModule(t.Context(), runDir, mod.Name, mod.Script, nil)
+		if result.Status == "error" && mod.Critical {
+			break
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(markerDir, "ran")); err == nil {
+		t.Error("module after critical failure should not have run")
+	}
+}
+
+func TestNonCriticalModuleContinuesExecution(t *testing.T) {
+	runDir := t.TempDir()
+	markerDir := t.TempDir()
+
+	modules := SortModules([]Module{
+		{Name: "00_noncritical", Script: "#!/bin/sh\nexit 1\n", Critical: false},
+		{Name: "10_after", Script: "#!/bin/sh\ntouch " + filepath.Join(markerDir, "ran") + "\nexit 0\n"},
+	})
+
+	for _, mod := range modules {
+		result := runModule(t.Context(), runDir, mod.Name, mod.Script, nil)
+		if result.Status == "error" && mod.Critical {
+			break
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(markerDir, "ran")); err != nil {
+		t.Error("module after non-critical failure should have run")
+	}
+}
+
 func TestModuleExecutionOrdering(t *testing.T) {
 	modules := []Module{
-		{"10_users", "#!/bin/sh\nexit 0\n"},
-		{"00_base", "#!/bin/sh\nexit 0\n"},
-		{"05_packages", "#!/bin/sh\nexit 0\n"},
+		{Name: "10_users", Script: "#!/bin/sh\nexit 0\n"},
+		{Name: "00_base", Script: "#!/bin/sh\nexit 0\n"},
+		{Name: "05_packages", Script: "#!/bin/sh\nexit 0\n"},
 	}
 
 	// Sort modules by name using SortModules
