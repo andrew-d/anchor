@@ -5,12 +5,16 @@ package copyfile
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+var logReflink sync.Once
 
 // Clone copies file data from src to dst using open file descriptors. It tries
 // a FICLONE reflink first for instant copy-on-write, falling back to io.Copy
@@ -18,9 +22,14 @@ import (
 func Clone(dst, src *os.File) error {
 	err := unix.IoctlSetInt(int(dst.Fd()), unix.FICLONE, int(src.Fd()))
 	if err == nil {
+		logReflink.Do(func() {
+			slog.Debug("FICLONE reflink supported")
+		})
 		return nil
 	}
-	// FICLONE failed — fall back to io.Copy.
+	logReflink.Do(func() {
+		slog.Debug("FICLONE reflink not supported, using fallback copy", "error", err)
+	})
 	if _, err := io.Copy(dst, src); err != nil {
 		return fmt.Errorf("copy data: %w", err)
 	}
