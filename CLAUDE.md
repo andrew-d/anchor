@@ -15,7 +15,7 @@ After making changes, verify with `make ci`.
 
 ## Architecture
 
-Anchor consists of two parts: a server that shows the current status and allows distributing configuration to endpoints, and a very minimal agent. Both are compiled into the same binary (`cmd/anchor/main.go` with `server` and `agent` subcommands).
+Anchor consists of two parts: a server that shows the current status and allows distributing configuration to endpoints, and a very minimal agent. Both are compiled into the same binary (`cmd/anchor/main.go` with `server`, `agent`, `keygen`, and `sign` subcommands).
 
 The server can be connected to by any agent, and stores information provided by that agent. It maintains a list of modules assigned to each agent, and has a basic web UI that shows the status of each module and allows assigning modules to agents. It stores data in SQLite, and modules are read from a configuration directory (defaulting to `/etc/anchor-server/modules.d`).
 
@@ -38,6 +38,18 @@ A module may have an associated `<filename>.d/` directory containing arbitrary f
 File permissions are preserved through the pipeline (server loader → checkin response → agent cache → execution directory). The server discovers artifacts by walking `.d` directories; if a `.d` directory exists but cannot be read, the module is treated as a load error.
 
 Path traversal safety: the agent uses `os.Root` to confine all file writes (both the script and artifact copies) within the temporary execution directory.
+
+#### Signing
+
+Modules can optionally be signed with ed25519 keys. The signing system uses the `internal/signing` package.
+
+**Server side:** The module loader reads `<filename>.sig` sidecar files alongside module scripts. The `.sig` file contains a hex-encoded 64-byte ed25519 signature of the script content. Files ending in `.sig` are skipped during module discovery (not treated as modules). Malformed `.sig` files cause the associated module to be treated as a load error. Signatures are passed through the checkin API as a hex-encoded string in the `signature` field of `CheckinModule`.
+
+**Agent side:** Signature verification is opt-in via `--verify-key` (repeatable; accepts inline `ssh-ed25519` keys, Anchor PEM files, or SSH pubkey files) and `--verify-key-url` (URL returning SSH `authorized_keys` format). When verification is enabled, the agent resolves a trust set before each run loop and rejects modules with missing or invalid signatures (reporting status "error" to the server). URL-fetched keys are cached to `{dataDir}/trusted-keys-cache` for offline fallback.
+
+**CLI:** `anchor keygen -o <basename>` generates `<basename>.key` (private, 0600) and `<basename>.pub` (public, 0644) in Anchor PEM format. `anchor sign -k <keyfile> <module>...` produces `<module>.sig` sidecar files.
+
+**Key formats:** The signing package supports both Anchor PEM format (`ANCHOR SIGNING KEY` / `ANCHOR PUBLIC KEY` block types) and OpenSSH formats (private keys via `ssh.ParseRawPrivateKey`, public keys via SSH `authorized_keys` lines). Only ed25519 keys are accepted; non-ed25519 keys are rejected with an error.
 
 ### SQLite
 
