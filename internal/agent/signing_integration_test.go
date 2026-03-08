@@ -52,6 +52,7 @@ func TestIntegrationSigningWorkflow_SignedModuleExecutes(t *testing.T) {
 
 		// Set up handler that returns signed module
 		var reportedModules []string
+		var reportStatuses []string
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/checkin" && r.Method == "POST" {
 				resp := api.CheckinResponse{
@@ -70,6 +71,7 @@ func TestIntegrationSigningWorkflow_SignedModuleExecutes(t *testing.T) {
 				var req api.ReportRequest
 				json.NewDecoder(r.Body).Decode(&req)
 				reportedModules = append(reportedModules, req.ModuleName)
+				reportStatuses = append(reportStatuses, req.Status)
 
 				resp := api.ReportResponse{OK: true}
 				w.Header().Set("Content-Type", "application/json")
@@ -92,6 +94,14 @@ func TestIntegrationSigningWorkflow_SignedModuleExecutes(t *testing.T) {
 		}
 		if reportedModules[0] != "test_module" {
 			t.Fatalf("expected module 'test_module', got %s", reportedModules[0])
+		}
+
+		// Verify the module executed successfully (status should be "ok" or "changed")
+		if len(reportStatuses) != 1 {
+			t.Fatalf("expected 1 status, got %d", len(reportStatuses))
+		}
+		if reportStatuses[0] != "ok" && reportStatuses[0] != "changed" {
+			t.Fatalf("expected module to execute successfully with status 'ok' or 'changed', got: %s", reportStatuses[0])
 		}
 	})
 }
@@ -512,6 +522,7 @@ func TestIntegrationSigningWorkflow_InlineKeysFromMultipleSources(t *testing.T) 
 		})
 
 		var reportedModules []string
+		var reportStatuses []string
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/checkin" && r.Method == "POST" {
 				resp := api.CheckinResponse{
@@ -530,6 +541,7 @@ func TestIntegrationSigningWorkflow_InlineKeysFromMultipleSources(t *testing.T) 
 				var req api.ReportRequest
 				json.NewDecoder(r.Body).Decode(&req)
 				reportedModules = append(reportedModules, req.ModuleName)
+				reportStatuses = append(reportStatuses, req.Status)
 
 				resp := api.ReportResponse{OK: true}
 				w.Header().Set("Content-Type", "application/json")
@@ -549,6 +561,14 @@ func TestIntegrationSigningWorkflow_InlineKeysFromMultipleSources(t *testing.T) 
 		// Module should be reported successfully (key1 matched)
 		if len(reportedModules) != 1 {
 			t.Fatalf("expected 1 report, got %d", len(reportedModules))
+		}
+
+		// Verify the module executed successfully (status should be "ok" or "changed")
+		if len(reportStatuses) != 1 {
+			t.Fatalf("expected 1 status, got %d", len(reportStatuses))
+		}
+		if reportStatuses[0] != "ok" && reportStatuses[0] != "changed" {
+			t.Fatalf("expected module to execute successfully with status 'ok' or 'changed', got: %s", reportStatuses[0])
 		}
 	})
 }
