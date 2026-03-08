@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -863,5 +864,182 @@ func TestLoadCachedKeys_FileNotFound(t *testing.T) {
 
 	if len(keys) != 0 {
 		t.Fatalf("expected 0 keys when cache file missing, got %d", len(keys))
+	}
+}
+
+// TestVerifyModule_AC4_1_NoVerification tests that all modules execute without verification
+// when no verification flags are set (AC4.1).
+func TestVerifyModule_AC4_1_NoVerification(t *testing.T) {
+	dataDir := t.TempDir()
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	// verifyEnabled should be false
+	if a.verifyEnabled {
+		t.Fatal("verifyEnabled should be false when no verify flags set")
+	}
+
+	// Create a module without signature
+	mod := Module{Name: "test", Script: "echo hello"}
+
+	// verifyModule should not be called in normal flow, but if it were,
+	// it should handle empty trustSet gracefully
+	result := a.verifyModule(mod, []ed25519.PublicKey{})
+	if result == "" {
+		t.Fatal("empty trustSet should return error")
+	}
+}
+
+// TestVerifyModule_AC4_2_ValidSignature tests that a module with valid signature
+// matching a trusted key executes normally (AC4.2).
+func TestVerifyModule_AC4_2_ValidSignature(t *testing.T) {
+	dataDir := t.TempDir()
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	// Generate a key pair for testing
+	privKey, pubKey, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+
+	// Create a module with a valid signature
+	script := "echo hello"
+	sig := signing.Sign(privKey, []byte(script))
+
+	mod := Module{
+		Name:      "test",
+		Script:    script,
+		Signature: strings.ToUpper(hex.EncodeToString(sig)),
+	}
+
+	// Verify should succeed
+	result := a.verifyModule(mod, []ed25519.PublicKey{pubKey})
+	if result != "" {
+		t.Fatalf("verification should succeed, got error: %s", result)
+	}
+}
+
+// TestVerifyModule_AC4_3_MultipleKeys tests that module signed by any one of
+// multiple trusted keys executes (AC4.3).
+func TestVerifyModule_AC4_3_MultipleKeys(t *testing.T) {
+	dataDir := t.TempDir()
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	// Generate two key pairs
+	_, pubKey1, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair 1: %v", err)
+	}
+
+	privKey2, pubKey2, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair 2: %v", err)
+	}
+
+	// Sign with second key
+	script := "echo hello"
+	sig := signing.Sign(privKey2, []byte(script))
+
+	mod := Module{
+		Name:      "test",
+		Script:    script,
+		Signature: strings.ToUpper(hex.EncodeToString(sig)),
+	}
+
+	// Verify with both keys available - should succeed
+	trustSet := []ed25519.PublicKey{pubKey1, pubKey2}
+	result := a.verifyModule(mod, trustSet)
+	if result != "" {
+		t.Fatalf("verification should succeed with multiple keys, got error: %s", result)
+	}
+}
+
+// TestVerifyModule_AC4_4_MissingSignature tests that missing signature when
+// verification is enabled results in an error (AC4.4).
+func TestVerifyModule_AC4_4_MissingSignature(t *testing.T) {
+	dataDir := t.TempDir()
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	_, pubKey, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+
+	// Module with empty signature
+	mod := Module{
+		Name:      "test",
+		Script:    "echo hello",
+		Signature: "",
+	}
+
+	result := a.verifyModule(mod, []ed25519.PublicKey{pubKey})
+	if result != "missing signature" {
+		t.Fatalf("expected 'missing signature' error, got: %s", result)
+	}
+}
+
+// TestVerifyModule_AC4_5_InvalidSignature tests that invalid signature
+// (wrong key or tampered content) results in error (AC4.5).
+func TestVerifyModule_AC4_5_InvalidSignature(t *testing.T) {
+	dataDir := t.TempDir()
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	// Generate two different key pairs
+	privKey1, _, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair 1: %v", err)
+	}
+
+	_, pubKey2, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair 2: %v", err)
+	}
+
+	// Sign with key1
+	script := "echo hello"
+	sig := signing.Sign(privKey1, []byte(script))
+
+	// But try to verify with key2 - should fail
+	mod := Module{
+		Name:      "test",
+		Script:    script,
+		Signature: strings.ToUpper(hex.EncodeToString(sig)),
+	}
+
+	result := a.verifyModule(mod, []ed25519.PublicKey{pubKey2})
+	if result != "signature verification failed" {
+		t.Fatalf("expected 'signature verification failed' error, got: %s", result)
+	}
+}
+
+// TestVerifyModule_AC4_6_NoTrustedKeys tests that verification with
+// verification flags specified but empty trust set rejects all modules (AC4.6).
+func TestVerifyModule_AC4_6_NoTrustedKeys(t *testing.T) {
+	dataDir := t.TempDir()
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	privKey, pubKey, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+
+	script := "echo hello"
+	sig := signing.Sign(privKey, []byte(script))
+
+	mod := Module{
+		Name:      "test",
+		Script:    script,
+		Signature: strings.ToUpper(hex.EncodeToString(sig)),
+	}
+
+	// Empty trust set should result in "no trusted keys available"
+	result := a.verifyModule(mod, []ed25519.PublicKey{})
+	if result != "no trusted keys available" {
+		t.Fatalf("expected 'no trusted keys available' error, got: %s", result)
+	}
+
+	// But if we provide a trustSet with the correct key, it should work
+	result = a.verifyModule(mod, []ed25519.PublicKey{pubKey})
+	if result != "" {
+		t.Fatalf("should succeed with correct key in trust set, got error: %s", result)
 	}
 }

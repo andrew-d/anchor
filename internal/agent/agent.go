@@ -67,6 +67,33 @@ func New(serverURL string, dataDir string, verify VerifyConfig) *Agent {
 	}
 }
 
+// postReport sends a module result report to the server. Returns true on success,
+// false on failure (logged internally).
+func (a *Agent) postReport(reportReq api.ReportRequest) bool {
+	reportURL := a.serverURL + "/api/report"
+	reportBody, err := json.Marshal(reportReq)
+	if err != nil {
+		slog.Error("failed to marshal report request", "error", err)
+		return false
+	}
+
+	reportResp, err := a.httpClient.Post(reportURL, "application/json", bytes.NewReader(reportBody))
+	if err != nil {
+		slog.Error("report request failed", "error", err, "url", reportURL, "module", reportReq.ModuleName)
+		return false
+	}
+
+	io.Copy(io.Discard, reportResp.Body)
+	reportResp.Body.Close()
+
+	if reportResp.StatusCode != http.StatusOK && reportResp.StatusCode != http.StatusCreated {
+		slog.Error("report request returned non-OK status", "status", reportResp.StatusCode, "module", reportReq.ModuleName)
+		return false
+	}
+
+	return true
+}
+
 // sleep waits for the given duration or until the context is cancelled.
 // Returns true if the duration elapsed, false if the context was cancelled.
 func sleep(ctx context.Context, d time.Duration) bool {
@@ -251,12 +278,49 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		modules = SortModules(modules)
 
+		// Resolve trust set for signature verification
+		var trustSet []ed25519.PublicKey
+		if a.verifyEnabled {
+			trustSet = a.resolveTrustSet()
+			if len(trustSet) == 0 {
+				slog.Error("no trusted keys available, rejecting all modules")
+			}
+			slog.Debug("trust set resolved", "key_count", len(trustSet))
+		}
+
 		// Execute each module, audit, and report results
 		auditLog := newAuditLog(filepath.Join(a.dataDir, "audit.log"))
 		reportFailed := false
 		for _, mod := range modules {
 			if ctx.Err() != nil {
 				break
+			}
+
+			// Verify signature if verification is enabled
+			if a.verifyEnabled {
+				verifyResult := a.verifyModule(mod, trustSet)
+				if verifyResult != "" {
+					slog.Error("module signature verification failed", "module", mod.Name, "reason", verifyResult)
+					auditLog.log(mod.Name, mod.Script, "error")
+
+					reportReq := api.ReportRequest{
+						AgentID:    agentID,
+						ModuleName: mod.Name,
+						Status:     "error",
+						Stderr:     verifyResult,
+						ExecutedAt: time.Now().Unix(),
+					}
+					if !a.postReport(reportReq) {
+						reportFailed = true
+						break
+					}
+
+					if mod.Critical {
+						slog.Warn("critical module failed verification, skipping remaining modules", "module", mod.Name)
+						break
+					}
+					continue
+				}
 			}
 
 			// Execute module
@@ -274,28 +338,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				ExecutedAt: time.Now().Unix(),
 			}
 
-			// POST to server /api/report
-			reportURL := a.serverURL + "/api/report"
-			reportBody, err := json.Marshal(reportReq)
-			if err != nil {
-				slog.Error("failed to marshal report request", "error", err)
-				reportFailed = true
-				break
-			}
-
-			reportResp, err := a.httpClient.Post(reportURL, "application/json", bytes.NewReader(reportBody))
-			if err != nil {
-				slog.Error("report request failed", "error", err, "url", reportURL, "module", mod.Name)
-				reportFailed = true
-				break
-			}
-
-			// Read response to ensure connection is drained
-			io.Copy(io.Discard, reportResp.Body)
-			reportResp.Body.Close()
-
-			if reportResp.StatusCode != http.StatusOK && reportResp.StatusCode != http.StatusCreated {
-				slog.Error("report request returned non-OK status", "status", reportResp.StatusCode, "module", mod.Name)
+			if !a.postReport(reportReq) {
 				reportFailed = true
 				break
 			}
@@ -452,6 +495,32 @@ func readOrCreateUUID(dataDir string) (string, error) {
 	}
 
 	return uuid, nil
+}
+
+// verifyModule checks a module's signature against the trust set.
+// Returns empty string on success, or a descriptive error message on failure.
+func (a *Agent) verifyModule(mod Module, trustSet []ed25519.PublicKey) string {
+	if len(trustSet) == 0 {
+		return "no trusted keys available"
+	}
+
+	if mod.Signature == "" {
+		return "missing signature"
+	}
+
+	sig, err := hex.DecodeString(mod.Signature)
+	if err != nil {
+		return fmt.Sprintf("invalid signature encoding: %v", err)
+	}
+
+	message := []byte(mod.Script)
+	for _, key := range trustSet {
+		if signing.Verify(key, message, sig) {
+			return "" // success — matched a trusted key
+		}
+	}
+
+	return "signature verification failed"
 }
 
 // resolveTrustSet resolves all configured key sources into a set of ed25519
