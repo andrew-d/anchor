@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/andrew-d/anchor/internal/api"
+	"github.com/andrew-d/anchor/internal/signing"
 	"github.com/andrew-d/anchor/internal/sysinfo"
 )
 
@@ -450,4 +452,100 @@ func readOrCreateUUID(dataDir string) (string, error) {
 	}
 
 	return uuid, nil
+}
+
+// resolveTrustSet resolves all configured key sources into a set of ed25519
+// public keys. Called before each run loop iteration.
+func (a *Agent) resolveTrustSet() []ed25519.PublicKey {
+	var keys []ed25519.PublicKey
+
+	// Process --verify-key values: each is either an inline SSH key or a file path
+	for _, v := range a.verifyKeys {
+		if strings.HasPrefix(v, "ssh-") {
+			// Inline SSH authorized_keys format
+			parsed := signing.ParsePublicKeys([]byte(v))
+			keys = append(keys, parsed...)
+			continue
+		}
+
+		// Try reading as file
+		data, err := os.ReadFile(v)
+		if err != nil {
+			slog.Warn("failed to read verify key", "path", v, "error", err)
+			continue
+		}
+
+		// Try as anchor PEM first
+		pub, err := signing.ParsePublicKey(data)
+		if err == nil {
+			keys = append(keys, pub)
+			continue
+		}
+
+		// Try as SSH authorized_keys format (may contain multiple keys)
+		parsed := signing.ParsePublicKeys(data)
+		if len(parsed) > 0 {
+			keys = append(keys, parsed...)
+			continue
+		}
+
+		slog.Warn("no ed25519 keys found in file", "path", v)
+	}
+
+	// Process --verify-key-url
+	if a.verifyKeyURL != "" {
+		urlKeys := a.fetchAndCacheKeys()
+		keys = append(keys, urlKeys...)
+	}
+
+	return keys
+}
+
+// fetchAndCacheKeys fetches keys from the configured URL with a 10-second
+// timeout. On success, updates the cache file. On failure, falls back to
+// the cached version.
+func (a *Agent) fetchAndCacheKeys() []ed25519.PublicKey {
+	cachePath := filepath.Join(a.dataDir, "trusted-keys-cache")
+
+	// Create a dedicated HTTP client with 10-second timeout
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	resp, err := client.Get(a.verifyKeyURL)
+	if err != nil {
+		slog.Warn("failed to fetch verify key URL, using cache", "url", a.verifyKeyURL, "error", err)
+		return a.loadCachedKeys(cachePath)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("verify key URL returned non-OK status, using cache", "url", a.verifyKeyURL, "status", resp.StatusCode)
+		return a.loadCachedKeys(cachePath)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Warn("failed to read verify key URL response, using cache", "url", a.verifyKeyURL, "error", err)
+		return a.loadCachedKeys(cachePath)
+	}
+
+	// Update cache
+	if err := os.WriteFile(cachePath, body, 0644); err != nil {
+		slog.Warn("failed to write key cache", "path", cachePath, "error", err)
+	}
+
+	keys := signing.ParsePublicKeys(body)
+	if len(keys) == 0 {
+		slog.Warn("verify key URL returned no ed25519 keys", "url", a.verifyKeyURL)
+	}
+	return keys
+}
+
+// loadCachedKeys reads previously cached key data from disk.
+func (a *Agent) loadCachedKeys(cachePath string) []ed25519.PublicKey {
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		slog.Warn("no cached keys available", "path", cachePath, "error", err)
+		return nil
+	}
+	return signing.ParsePublicKeys(data)
 }

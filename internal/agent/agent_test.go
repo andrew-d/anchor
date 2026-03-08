@@ -1,17 +1,21 @@
 package agent
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/andrew-d/anchor/internal/api"
+	"github.com/andrew-d/anchor/internal/signing"
+	"golang.org/x/crypto/ssh"
 )
 
 // handlerTransport is an http.RoundTripper that calls an http.Handler
@@ -370,5 +374,494 @@ func TestVerifyConfigDisabled(t *testing.T) {
 
 	if a.verifyKeyURL != "" {
 		t.Fatalf("expected empty KeyURL, got %s", a.verifyKeyURL)
+	}
+}
+
+// TestResolveTrustSet_InlineSSHKey tests AC5.1: inline ssh-ed25519 key parsing.
+func TestResolveTrustSet_InlineSSHKey(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Generate a test key
+	_, origPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	// Marshal it to SSH authorized_keys format
+	sshPub, err := ssh.NewPublicKey(origPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKeyLine := ssh.MarshalAuthorizedKey(sshPub)
+
+	a := New("http://fake", dataDir, VerifyConfig{
+		Keys: []string{string(sshKeyLine)},
+	})
+
+	keys := a.resolveTrustSet()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+
+	if !strings.Contains(string(sshKeyLine), "ssh-ed25519") {
+		t.Fatal("test setup error: key should be in ssh-ed25519 format")
+	}
+}
+
+// TestResolveTrustSet_AnchorPEMFile tests AC5.2: anchor PEM file parsing.
+func TestResolveTrustSet_AnchorPEMFile(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Generate a test key
+	_, pubKey, err := signing.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	// Marshal it to Anchor PEM format
+	pubPEM := signing.MarshalPublicKey(pubKey)
+
+	// Write to a temp file
+	keyFile := filepath.Join(dataDir, "test.pub")
+	if err := os.WriteFile(keyFile, pubPEM, 0644); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
+
+	a := New("http://fake", dataDir, VerifyConfig{
+		Keys: []string{keyFile},
+	})
+
+	keys := a.resolveTrustSet()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(pubKey) {
+		t.Fatal("parsed key does not match original key")
+	}
+}
+
+// TestResolveTrustSet_SSHPublicKeyFile tests AC5.3: SSH public key file parsing.
+func TestResolveTrustSet_SSHPublicKeyFile(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Generate a test key
+	_, origPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	expectedPubKey := origPriv.Public().(ed25519.PublicKey)
+
+	// Marshal it to SSH authorized_keys format
+	sshPub, err := ssh.NewPublicKey(origPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKeyLine := ssh.MarshalAuthorizedKey(sshPub)
+
+	// Write to a temp file (authorized_keys format)
+	keyFile := filepath.Join(dataDir, "authorized_keys")
+	if err := os.WriteFile(keyFile, sshKeyLine, 0644); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
+
+	a := New("http://fake", dataDir, VerifyConfig{
+		Keys: []string{keyFile},
+	})
+
+	keys := a.resolveTrustSet()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(expectedPubKey) {
+		t.Fatal("parsed key does not match original key")
+	}
+}
+
+// TestResolveTrustSet_MixedKeyTypes tests AC5.5: file with RSA + ed25519 only returns ed25519.
+func TestResolveTrustSet_MixedKeyTypes(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Generate an ed25519 key
+	_, origPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	expectedPubKey := origPriv.Public().(ed25519.PublicKey)
+
+	// Marshal to SSH format
+	sshPub, err := ssh.NewPublicKey(origPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKeyLine := ssh.MarshalAuthorizedKey(sshPub)
+
+	// Create a fake SSH file with RSA and ed25519 keys
+	rsaKey := []byte("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7/test")
+	mixedContent := append(rsaKey, '\n')
+	mixedContent = append(mixedContent, sshKeyLine...)
+
+	keyFile := filepath.Join(dataDir, "mixed_keys")
+	if err := os.WriteFile(keyFile, mixedContent, 0644); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
+
+	a := New("http://fake", dataDir, VerifyConfig{
+		Keys: []string{keyFile},
+	})
+
+	keys := a.resolveTrustSet()
+	// Should only get the ed25519 key, RSA silently skipped
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key (only ed25519), got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(expectedPubKey) {
+		t.Fatal("parsed key does not match original ed25519 key")
+	}
+}
+
+// TestFetchAndCacheKeys_Success tests AC6.1 and AC6.2: fetch succeeds and cache is updated.
+func TestFetchAndCacheKeys_Success(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Generate test keys
+	_, origPriv1, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	_, origPriv2, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	// Marshal to SSH format
+	sshPub1, err := ssh.NewPublicKey(origPriv1.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshPub2, err := ssh.NewPublicKey(origPriv2.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKey1 := ssh.MarshalAuthorizedKey(sshPub1)
+	sshKey2 := ssh.MarshalAuthorizedKey(sshPub2)
+	keysContent := append(sshKey1, sshKey2...)
+
+	// Create an httptest server that returns the keys
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(keysContent)
+	}))
+	defer server.Close()
+
+	a := New(server.URL, dataDir, VerifyConfig{
+		KeyURL: server.URL + "/keys",
+	})
+
+	keys := a.fetchAndCacheKeys()
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys from fetch, got %d", len(keys))
+	}
+
+	// Verify cache file was created and contains the same content
+	cachePath := filepath.Join(dataDir, "trusted-keys-cache")
+	cacheContent, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("cache file not created: %v", err)
+	}
+
+	if string(cacheContent) != string(keysContent) {
+		t.Fatal("cache content does not match fetched content")
+	}
+}
+
+// TestFetchAndCacheKeys_CacheFallback tests AC6.3: fetch failure falls back to cache.
+func TestFetchAndCacheKeys_CacheFallback(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Pre-populate the cache with test keys
+	_, origPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	expectedPubKey := origPriv.Public().(ed25519.PublicKey)
+
+	// Marshal to SSH format
+	sshPub, err := ssh.NewPublicKey(origPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKey := ssh.MarshalAuthorizedKey(sshPub)
+	cachePath := filepath.Join(dataDir, "trusted-keys-cache")
+	if err := os.WriteFile(cachePath, sshKey, 0644); err != nil {
+		t.Fatalf("failed to write cache: %v", err)
+	}
+
+	// Create a server that fails
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	a := New(server.URL, dataDir, VerifyConfig{
+		KeyURL: server.URL + "/keys",
+	})
+
+	keys := a.fetchAndCacheKeys()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key from cache fallback, got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(expectedPubKey) {
+		t.Fatal("cached key does not match original key")
+	}
+}
+
+// TestFetchAndCacheKeys_UpdateOnSuccess tests AC6.4: cache is updated on successful fetch.
+func TestFetchAndCacheKeys_UpdateOnSuccess(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Pre-populate cache with old keys
+	_, oldPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	oldSSHPub, err := ssh.NewPublicKey(oldPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	oldSSHKey := ssh.MarshalAuthorizedKey(oldSSHPub)
+	cachePath := filepath.Join(dataDir, "trusted-keys-cache")
+	if err := os.WriteFile(cachePath, oldSSHKey, 0644); err != nil {
+		t.Fatalf("failed to write initial cache: %v", err)
+	}
+
+	// Generate new keys for server to return
+	_, newPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	expectedNewKey := newPriv.Public().(ed25519.PublicKey)
+
+	newSSHPub, err := ssh.NewPublicKey(newPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	newSSHKey := ssh.MarshalAuthorizedKey(newSSHPub)
+
+	// Create server that returns new keys
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(newSSHKey)
+	}))
+	defer server.Close()
+
+	a := New(server.URL, dataDir, VerifyConfig{
+		KeyURL: server.URL + "/keys",
+	})
+
+	keys := a.fetchAndCacheKeys()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 new key, got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(expectedNewKey) {
+		t.Fatal("fetched key does not match expected new key")
+	}
+
+	// Verify cache was updated with new content
+	cacheContent, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("failed to read cache: %v", err)
+	}
+
+	if string(cacheContent) != string(newSSHKey) {
+		t.Fatal("cache was not updated with new content")
+	}
+}
+
+// TestFetchAndCacheKeys_Timeout tests AC6.5: fetch timeout falls back to cache.
+func TestFetchAndCacheKeys_Timeout(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Pre-populate cache with test keys
+	_, origPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	expectedPubKey := origPriv.Public().(ed25519.PublicKey)
+
+	// Marshal to SSH format
+	sshPub, err := ssh.NewPublicKey(origPriv.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKey := ssh.MarshalAuthorizedKey(sshPub)
+	cachePath := filepath.Join(dataDir, "trusted-keys-cache")
+	if err := os.WriteFile(cachePath, sshKey, 0644); err != nil {
+		t.Fatalf("failed to write cache: %v", err)
+	}
+
+	// Create a channel-based handler that simulates a timeout without actually sleeping
+	done := make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never respond, simulating a timeout
+		<-done
+	})
+
+	server := httptest.NewServer(handler)
+
+	a := New(server.URL, dataDir, VerifyConfig{
+		KeyURL: server.URL + "/keys",
+	})
+
+	// fetchAndCacheKeys should timeout after 10 seconds and fall back to cache
+	keys := a.fetchAndCacheKeys()
+	close(done) // Clean up the handler
+	server.Close()
+
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key from cache fallback, got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(expectedPubKey) {
+		t.Fatal("cached key does not match original key")
+	}
+}
+
+// TestFetchAndCacheKeys_NoED25519Keys tests AC6.6: URL returns zero ed25519 keys (warning logged, zero keys).
+func TestFetchAndCacheKeys_NoED25519Keys(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Create a server that returns only RSA keys (no ed25519)
+	rsaKeys := []byte("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7/test\n")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(rsaKeys)
+	}))
+	defer server.Close()
+
+	a := New(server.URL, dataDir, VerifyConfig{
+		KeyURL: server.URL + "/keys",
+	})
+
+	keys := a.fetchAndCacheKeys()
+	if len(keys) != 0 {
+		t.Fatalf("expected 0 keys (no ed25519), got %d", len(keys))
+	}
+
+	// Verify cache file was still updated (even with zero ed25519 keys)
+	cachePath := filepath.Join(dataDir, "trusted-keys-cache")
+	cacheContent, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("cache file not created: %v", err)
+	}
+
+	if string(cacheContent) != string(rsaKeys) {
+		t.Fatal("cache was not updated with fetched content (even though no ed25519 keys)")
+	}
+}
+
+// TestFetchAndCacheKeys_EmptyTrustSet tests AC6.7: fetch fails with no cache and no inline keys.
+func TestFetchAndCacheKeys_EmptyTrustSet(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Create a server that fails
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	a := New(server.URL, dataDir, VerifyConfig{
+		KeyURL: server.URL + "/keys",
+	})
+
+	// No cache exists, no inline keys
+	keys := a.fetchAndCacheKeys()
+	if len(keys) != 0 {
+		t.Fatalf("expected 0 keys (no cache, fetch failed), got %d", len(keys))
+	}
+}
+
+// TestLoadCachedKeys_Success tests loading cached keys from file.
+func TestLoadCachedKeys_Success(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Generate test keys
+	_, origPriv1, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	_, origPriv2, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey failed: %v", err)
+	}
+
+	expectedKey1 := origPriv1.Public().(ed25519.PublicKey)
+	expectedKey2 := origPriv2.Public().(ed25519.PublicKey)
+
+	// Marshal to SSH format
+	sshPub1, err := ssh.NewPublicKey(origPriv1.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshPub2, err := ssh.NewPublicKey(origPriv2.Public())
+	if err != nil {
+		t.Fatalf("NewPublicKey failed: %v", err)
+	}
+
+	sshKey1 := ssh.MarshalAuthorizedKey(sshPub1)
+	sshKey2 := ssh.MarshalAuthorizedKey(sshPub2)
+	keysContent := append(sshKey1, sshKey2...)
+
+	// Write cache file
+	cachePath := filepath.Join(dataDir, "trusted-keys-cache")
+	if err := os.WriteFile(cachePath, keysContent, 0644); err != nil {
+		t.Fatalf("failed to write cache: %v", err)
+	}
+
+	a := New("http://fake", dataDir, VerifyConfig{})
+	keys := a.loadCachedKeys(cachePath)
+
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys from cache, got %d", len(keys))
+	}
+
+	if string(keys[0]) != string(expectedKey1) || string(keys[1]) != string(expectedKey2) {
+		t.Fatal("cached keys do not match original keys")
+	}
+}
+
+// TestLoadCachedKeys_FileNotFound tests loading cached keys when file doesn't exist.
+func TestLoadCachedKeys_FileNotFound(t *testing.T) {
+	dataDir := t.TempDir()
+
+	a := New("http://fake", dataDir, VerifyConfig{})
+	cachePath := filepath.Join(dataDir, "nonexistent")
+	keys := a.loadCachedKeys(cachePath)
+
+	if len(keys) != 0 {
+		t.Fatalf("expected 0 keys when cache file missing, got %d", len(keys))
 	}
 }
