@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -75,7 +76,12 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	modules := make([]api.CheckinModule, 0)
 	for _, name := range assignedNames {
 		if mod, ok := s.loader.GetModule(name); ok {
-			cm := api.CheckinModule{Name: name, Script: mod.Script, Critical: mod.Critical}
+			cm := api.CheckinModule{
+				Name:      name,
+				Script:    mod.Script,
+				Critical:  mod.Critical,
+				Signature: hex.EncodeToString(mod.Signature),
+			}
 			for _, art := range mod.Artifacts {
 				cm.Artifacts = append(cm.Artifacts, api.CheckinArtifact{
 					RelPath: art.RelPath,

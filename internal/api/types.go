@@ -22,6 +22,7 @@ type CheckinModule struct {
 	Script    string            `json:"script"`
 	Critical  bool              `json:"critical,omitempty"`
 	Artifacts []CheckinArtifact `json:"artifacts,omitempty"`
+	Signature string            `json:"signature,omitempty"`
 }
 
 // CheckinArtifact describes a file artifact associated with a module.

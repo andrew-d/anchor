@@ -901,3 +901,134 @@ func TestCheckinWithArtifacts(t *testing.T) {
 		t.Errorf("expected mode 0644, got %04o", art.Mode)
 	}
 }
+
+// TestCheckinWithSignedModule tests AC3.4: Checkin response includes hex-encoded signature
+func TestCheckinWithSignedModule(t *testing.T) {
+	t.Parallel()
+	s, store, loader := newTestServer(t)
+
+	// Create module with signature
+	modulesDir := s.modulesDir
+	writeTestModule(t, modulesDir, "00_signed", "Signed Module")
+
+	// Create a valid 64-byte signature
+	sigBytes := make([]byte, 64)
+	for i := range sigBytes {
+		sigBytes[i] = byte(i % 256)
+	}
+	sigHex := fmt.Sprintf("%x", sigBytes)
+	sigPath := filepath.Join(modulesDir, "00_signed.sig")
+	if err := os.WriteFile(sigPath, []byte(sigHex+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loader.LoadAll(t.Context()); err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Create agent and assign module
+	agent := db.Agent{
+		ID:       "agent-sig-1",
+		Hostname: "test-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Distro:   "ubuntu-22.04",
+	}
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AssignModule(t.Context(), "00_signed", new("agent-sig-1"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := api.CheckinRequest{
+		ID:       "agent-sig-1",
+		Hostname: "test-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Distro:   "ubuntu-22.04",
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("POST", "/api/checkin", bytes.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCheckin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	var resp api.CheckinResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if len(resp.Modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(resp.Modules))
+	}
+
+	// Verify signature is present and matches
+	if resp.Modules[0].Signature == "" {
+		t.Error("expected non-empty signature in response")
+	}
+	if resp.Modules[0].Signature != sigHex {
+		t.Errorf("signature mismatch: got %s, want %s", resp.Modules[0].Signature, sigHex)
+	}
+}
+
+// TestCheckinWithUnsignedModule tests that unsigned modules don't include signature field in JSON
+func TestCheckinWithUnsignedModule(t *testing.T) {
+	t.Parallel()
+	s, store, loader := newTestServer(t)
+
+	// Create module without signature
+	modulesDir := s.modulesDir
+	writeTestModule(t, modulesDir, "00_unsigned", "Unsigned Module")
+
+	if _, err := loader.LoadAll(t.Context()); err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Create agent and assign module
+	agent := db.Agent{
+		ID:       "agent-unsig-1",
+		Hostname: "test-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Distro:   "ubuntu-22.04",
+	}
+	if err := store.UpsertAgent(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AssignModule(t.Context(), "00_unsigned", new("agent-unsig-1"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reqBody := api.CheckinRequest{
+		ID:       "agent-unsig-1",
+		Hostname: "test-host",
+		OS:       "linux",
+		Arch:     "amd64",
+		Distro:   "ubuntu-22.04",
+	}
+	reqJSON, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("POST", "/api/checkin", bytes.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleCheckin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+
+	// Decode response JSON to check the raw field
+	var resp api.CheckinResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if len(resp.Modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(resp.Modules))
+	}
+
+	// For unsigned modules, Signature should be empty string (which is omitted by omitempty)
+	if resp.Modules[0].Signature != "" {
+		t.Errorf("expected empty signature for unsigned module, got %s", resp.Modules[0].Signature)
+	}
+}
