@@ -155,7 +155,7 @@ func TestAgentPollingLoop_CheckinServerError(t *testing.T) {
 			}
 		})
 
-		agent := New("http://fake", dataDir)
+		agent := New("http://fake", dataDir, VerifyConfig{})
 		agent.httpClient = &http.Client{Transport: &handlerTransport{handler: handler}}
 
 		go agent.Run(t.Context())
@@ -206,7 +206,7 @@ func TestAgentPollingLoop_ReportsModulesIndividually(t *testing.T) {
 			}
 		})
 
-		agent := New("http://fake", dataDir)
+		agent := New("http://fake", dataDir, VerifyConfig{})
 		agent.httpClient = &http.Client{Transport: &handlerTransport{handler: handler}}
 
 		go agent.Run(t.Context())
@@ -276,7 +276,7 @@ func TestAgentPollingLoop_StopsOnReportFailure(t *testing.T) {
 			}
 		})
 
-		agent := New("http://fake", dataDir)
+		agent := New("http://fake", dataDir, VerifyConfig{})
 		agent.httpClient = &http.Client{Transport: &handlerTransport{handler: handler}}
 
 		go agent.Run(t.Context())
@@ -308,4 +308,67 @@ func TestAgentPollingLoop_StopsOnReportFailure(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestVerifyConfigMultipleKeys verifies that multiple verify keys in VerifyConfig
+// combine into a single trust set with verifyEnabled=true (AC5.4).
+func TestVerifyConfigMultipleKeys(t *testing.T) {
+	dataDir := t.TempDir()
+	keys := []string{"key1", "key2", "key3"}
+
+	a := New("http://fake", dataDir, VerifyConfig{
+		Keys: keys,
+	})
+
+	if !a.verifyEnabled {
+		t.Fatal("expected verifyEnabled to be true when keys are provided")
+	}
+
+	if len(a.verifyKeys) != 3 {
+		t.Fatalf("expected 3 keys, got %d", len(a.verifyKeys))
+	}
+
+	for i, key := range a.verifyKeys {
+		if key != keys[i] {
+			t.Fatalf("key mismatch at index %d: expected %s, got %s", i, keys[i], key)
+		}
+	}
+}
+
+// TestVerifyConfigKeyURL verifies that setting KeyURL enables verification
+// (AC5.4).
+func TestVerifyConfigKeyURL(t *testing.T) {
+	dataDir := t.TempDir()
+
+	a := New("http://fake", dataDir, VerifyConfig{
+		KeyURL: "https://example.com/keys",
+	})
+
+	if !a.verifyEnabled {
+		t.Fatal("expected verifyEnabled to be true when KeyURL is provided")
+	}
+
+	if a.verifyKeyURL != "https://example.com/keys" {
+		t.Fatalf("expected KeyURL to be set, got %s", a.verifyKeyURL)
+	}
+}
+
+// TestVerifyConfigDisabled verifies that with empty config, verification is disabled
+// (AC4.1 prerequisite).
+func TestVerifyConfigDisabled(t *testing.T) {
+	dataDir := t.TempDir()
+
+	a := New("http://fake", dataDir, VerifyConfig{})
+
+	if a.verifyEnabled {
+		t.Fatal("expected verifyEnabled to be false when no config is provided")
+	}
+
+	if len(a.verifyKeys) != 0 {
+		t.Fatalf("expected 0 keys, got %d", len(a.verifyKeys))
+	}
+
+	if a.verifyKeyURL != "" {
+		t.Fatalf("expected empty KeyURL, got %s", a.verifyKeyURL)
+	}
 }

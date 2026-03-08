@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/andrew-d/anchor/internal/agent"
@@ -16,6 +17,15 @@ import (
 	"github.com/andrew-d/anchor/internal/signing"
 	"github.com/andrew-d/anchor/internal/version"
 )
+
+// stringSlice implements flag.Value for repeatable string flags.
+type stringSlice []string
+
+func (s *stringSlice) String() string { return strings.Join(*s, ", ") }
+func (s *stringSlice) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
 
 const usage = `Usage: anchor <command> [flags]
 
@@ -94,6 +104,11 @@ func runAgent(args []string) int {
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	serverURL := fs.String("server", "", "server URL")
 	dataDir := fs.String("data-dir", defaultDataDir, "directory for persistent data")
+
+	var verifyKeys stringSlice
+	fs.Var(&verifyKeys, "verify-key", "trusted public key (inline ssh-ed25519, anchor PEM file, or SSH pubkey file; repeatable)")
+	verifyKeyURL := fs.String("verify-key-url", "", "URL returning SSH authorized_keys format keys (e.g. https://github.com/user.keys)")
+
 	if err := fs.Parse(args); err != nil {
 		slog.Error("failed to parse flags", "error", err)
 		return 1
@@ -107,7 +122,10 @@ func runAgent(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	a := agent.New(*serverURL, *dataDir)
+	a := agent.New(*serverURL, *dataDir, agent.VerifyConfig{
+		Keys:   verifyKeys,
+		KeyURL: *verifyKeyURL,
+	})
 
 	// SIGHUP triggers an immediate checkin cycle
 	sighup := make(chan os.Signal, 1)

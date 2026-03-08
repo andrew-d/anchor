@@ -31,16 +31,37 @@ type Agent struct {
 	// reload is signalled to interrupt a poll sleep and trigger an
 	// immediate checkin cycle (e.g. on SIGHUP).
 	reload chan struct{}
+
+	// verifyKeys are inline or file-based public keys for signature verification.
+	// Empty if no verification flags specified (verification disabled).
+	verifyKeys []string
+
+	// verifyKeyURL is a URL to fetch SSH authorized_keys format keys from.
+	// Empty if not configured.
+	verifyKeyURL string
+
+	// verifyEnabled is true if any --verify-key or --verify-key-url flag
+	// was specified. Determines whether verification is active.
+	verifyEnabled bool
+}
+
+// VerifyConfig holds optional signature verification settings.
+type VerifyConfig struct {
+	Keys   []string // inline keys or file paths
+	KeyURL string   // URL to fetch keys from
 }
 
 // New creates a new Agent.
-func New(serverURL string, dataDir string) *Agent {
+func New(serverURL string, dataDir string, verify VerifyConfig) *Agent {
 	return &Agent{
-		serverURL:  serverURL,
-		dataDir:    dataDir,
-		retryDelay: retryDelay,
-		httpClient: http.DefaultClient,
-		reload:     make(chan struct{}, 1),
+		serverURL:     serverURL,
+		dataDir:       dataDir,
+		retryDelay:    retryDelay,
+		httpClient:    http.DefaultClient,
+		reload:        make(chan struct{}, 1),
+		verifyKeys:    verify.Keys,
+		verifyKeyURL:  verify.KeyURL,
+		verifyEnabled: len(verify.Keys) > 0 || verify.KeyURL != "",
 	}
 }
 
@@ -224,7 +245,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		// Sort modules by name
 		modules := make([]Module, len(checkinResp.Modules))
 		for i, m := range checkinResp.Modules {
-			modules[i] = Module{Name: m.Name, Script: m.Script, Critical: m.Critical}
+			modules[i] = Module{Name: m.Name, Script: m.Script, Critical: m.Critical, Signature: m.Signature}
 		}
 		modules = SortModules(modules)
 
