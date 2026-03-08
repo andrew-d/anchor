@@ -116,7 +116,7 @@ function Dashboard() {
                                 <a href="#/agents/${a.id}">${a.display_name || a.hostname}</a>
                                 ${' '}
                                 ${a.tags.map(t => html`<span class="tag">${t.name}</span>`)}
-                                <div class="agent-subtitle">${a.remote_ip} · ${a.id.slice(-4)}</div>
+                                <div class="agent-subtitle">${a.remote_ip} · ${a.id.slice(-8)}</div>
                             </div>
                             <div>
                                 <span>${a.module_count} modules</span>

@@ -143,7 +143,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		slog.Error("failed to read or create agent UUID", "error", err)
 		return err
 	}
-	slog.Debug("agent UUID", "id", agentID)
+	shortID := agentID[len(agentID)-8:]
+	slog.SetDefault(slog.Default().With("agent_id", shortID))
+	slog.Info("agent UUID", "id", agentID)
 
 	// Gather system info
 	sysInfo := sysinfo.GatherSystemInfo()
