@@ -38,6 +38,7 @@ type Module struct {
 	Critical    bool       // If true, failure stops execution of later modules
 	Script      string     // Full script content
 	Artifacts   []Artifact // Associated files from .d directory, sorted by RelPath
+	Signature   []byte     // Ed25519 signature from .sig sidecar file (nil if unsigned)
 	hash        string     // SHA-256 hex digest of file contents
 }
 
@@ -133,6 +134,11 @@ func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 			continue
 		}
 
+		// Skip .sig sidecar files — they are not modules
+		if strings.HasSuffix(filename, ".sig") {
+			continue
+		}
+
 		// Read file contents
 		path := filepath.Join(l.dir, filename)
 		contents, err := os.ReadFile(path)
@@ -176,6 +182,25 @@ func (l *Loader) loadAll(ctx context.Context) ([]Module, error) {
 				continue
 			}
 			newCache[filename].Artifacts = artifacts
+		}
+
+		// Read .sig sidecar file if present.
+		// Always re-read (not cached by script hash) so that signing an
+		// existing module without modifying the script takes effect immediately.
+		sigPath := filepath.Join(l.dir, filename+".sig")
+		sigData, err := os.ReadFile(sigPath)
+		if err == nil {
+			sig, err := hex.DecodeString(strings.TrimSpace(string(sigData)))
+			if err != nil || len(sig) != 64 {
+				slog.Warn("malformed signature file", "file", filename+".sig", "error", "invalid hex or wrong length")
+				delete(newCache, filename)
+				newErrCache[filename] = &cachedError{hash: hashHex, message: "malformed signature file"}
+				continue
+			}
+			newCache[filename].Signature = sig
+		} else {
+			// No .sig file — clear any stale signature from cache-reused module
+			newCache[filename].Signature = nil
 		}
 	}
 

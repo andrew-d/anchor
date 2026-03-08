@@ -1,6 +1,7 @@
 package module
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -838,6 +839,306 @@ func TestLoadAllCriticalDefaultFalse(t *testing.T) {
 	}
 	if modules[0].Critical {
 		t.Error("expected Critical to default to false")
+	}
+}
+
+// TestSignatureLoading_SigFilesSkipped tests AC3.1: .sig files are not treated as modules
+func TestSignatureLoading_SigFilesSkipped(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create a valid module
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// Create a .sig file (not a module)
+	sigPath := filepath.Join(dir, "orphan.sig")
+	if err := os.WriteFile(sigPath, []byte("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Should only have 1 module (the .sig file should be skipped)
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module (sig file skipped), got %d", len(modules))
+	}
+	if modules[0].Filename != "00_base" {
+		t.Errorf("expected module '00_base', got '%s'", modules[0].Filename)
+	}
+}
+
+// TestSignatureLoading_ValidSignature tests AC3.2: Valid .sig sidecar is read and attached
+func TestSignatureLoading_ValidSignature(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// Create a valid hex-encoded 64-byte signature
+	sigBytes := make([]byte, 64)
+	for i := range sigBytes {
+		sigBytes[i] = byte(i % 256)
+	}
+	sigHex := fmt.Sprintf("%x", sigBytes)
+	sigPath := filepath.Join(dir, "00_base.sig")
+	if err := os.WriteFile(sigPath, []byte(sigHex+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+
+	if len(modules[0].Signature) != 64 {
+		t.Errorf("expected signature length 64, got %d", len(modules[0].Signature))
+	}
+
+	if !bytes.Equal(modules[0].Signature, sigBytes) {
+		t.Error("signature bytes don't match expected")
+	}
+}
+
+// TestSignatureLoading_NoSignatureFile tests AC3.3: Module without .sig file has nil signature
+func TestSignatureLoading_NoSignatureFile(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+
+	if modules[0].Signature != nil {
+		t.Errorf("expected nil signature for module without .sig file, got %v", modules[0].Signature)
+	}
+}
+
+// TestSignatureLoading_MalformedSignature tests AC3.5: Malformed .sig file treated as load error
+func TestSignatureLoading_MalformedSignature(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// Create a .sig file with invalid hex
+	sigPath := filepath.Join(dir, "00_base.sig")
+	if err := os.WriteFile(sigPath, []byte("not valid hex!\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Module should not be in loaded modules
+	if len(modules) != 0 {
+		t.Fatalf("expected 0 modules (malformed sig should cause load error), got %d", len(modules))
+	}
+
+	// Should appear in load errors
+	errors := loader.LoadErrors()
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errors))
+	}
+	if errors[0].Filename != "00_base" {
+		t.Errorf("expected error for '00_base', got '%s'", errors[0].Filename)
+	}
+	if !strings.Contains(errors[0].Error, "malformed signature") {
+		t.Errorf("expected 'malformed signature' in error, got '%s'", errors[0].Error)
+	}
+}
+
+// TestSignatureLoading_WrongLengthSignature tests AC3.5: Wrong-length signature treated as error
+func TestSignatureLoading_WrongLengthSignature(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// Create a .sig file with valid hex but wrong length (32 bytes instead of 64)
+	sigPath := filepath.Join(dir, "00_base.sig")
+	if err := os.WriteFile(sigPath, []byte("0123456789abcdef0123456789abcdef\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Module should not be in loaded modules
+	if len(modules) != 0 {
+		t.Fatalf("expected 0 modules (wrong sig length should cause load error), got %d", len(modules))
+	}
+
+	// Should appear in load errors
+	errors := loader.LoadErrors()
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errors))
+	}
+	if errors[0].Filename != "00_base" {
+		t.Errorf("expected error for '00_base', got '%s'", errors[0].Filename)
+	}
+}
+
+// TestSignatureLoading_OrphanSigFile tests AC3.6: .sig file with no matching module is ignored
+func TestSignatureLoading_OrphanSigFile(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	// Create only a .sig file with no matching module
+	sigPath := filepath.Join(dir, "orphan.sig")
+	if err := os.WriteFile(sigPath, []byte("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+
+	// Should be empty (orphan .sig is not an error, just ignored)
+	if len(modules) != 0 {
+		t.Fatalf("expected 0 modules, got %d", len(modules))
+	}
+
+	// Should not have any errors
+	errors := loader.LoadErrors()
+	if len(errors) != 0 {
+		t.Fatalf("expected 0 errors (orphan .sig should be silently ignored), got %d", len(errors))
+	}
+}
+
+// TestSignatureLoading_CacheIndependence tests cache independence of signature loading:
+// Load module without .sig, verify Signature is nil. Add .sig, load again, verify
+// Signature is set. Remove .sig, load again, verify Signature is cleared.
+func TestSignatureLoading_CacheIndependence(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// First load: no .sig file
+	modules, err := loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("first LoadAll failed: %v", err)
+	}
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Signature != nil {
+		t.Error("expected nil signature before adding .sig file")
+	}
+
+	// Add a valid .sig file
+	sigBytes := make([]byte, 64)
+	for i := range sigBytes {
+		sigBytes[i] = byte(i % 256)
+	}
+	sigHex := fmt.Sprintf("%x", sigBytes)
+	sigPath := filepath.Join(dir, "00_base.sig")
+	if err := os.WriteFile(sigPath, []byte(sigHex+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second load: with .sig file, module script unchanged (cache hit on script hash)
+	modules, err = loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("second LoadAll failed: %v", err)
+	}
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Signature == nil {
+		t.Error("expected signature to be set after adding .sig file")
+	}
+	if len(modules[0].Signature) != 64 {
+		t.Errorf("expected signature length 64, got %d", len(modules[0].Signature))
+	}
+
+	// Remove the .sig file
+	if err := os.Remove(sigPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Third load: .sig file removed, module script still unchanged
+	modules, err = loader.LoadAll(t.Context())
+	if err != nil {
+		t.Fatalf("third LoadAll failed: %v", err)
+	}
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Signature != nil {
+		t.Error("expected nil signature after removing .sig file")
+	}
+}
+
+// TestSignatureLoading_TrailingWhitespace tests that .sig files with trailing
+// newlines/whitespace are handled correctly
+func TestSignatureLoading_TrailingWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	loader := NewLoader(dir)
+
+	writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+	// Create a valid signature with various trailing whitespace
+	sigBytes := make([]byte, 64)
+	for i := range sigBytes {
+		sigBytes[i] = byte(i % 256)
+	}
+	sigHex := fmt.Sprintf("%x", sigBytes)
+
+	// Test with different whitespace variations
+	whitespaceTests := []string{
+		sigHex + "\n",
+		sigHex + "\r\n",
+		sigHex + "  \n",
+		sigHex + " \t \n",
+	}
+
+	for i, sigContent := range whitespaceTests {
+		t.Run(fmt.Sprintf("whitespace_%d", i), func(t *testing.T) {
+			// Clean up modules dir
+			os.RemoveAll(dir)
+			os.MkdirAll(dir, 0755)
+			loader = NewLoader(dir)
+
+			writeTestModule(t, dir, "00_base", "Base", "Base setup")
+
+			sigPath := filepath.Join(dir, "00_base.sig")
+			if err := os.WriteFile(sigPath, []byte(sigContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			modules, err := loader.LoadAll(t.Context())
+			if err != nil {
+				t.Fatalf("LoadAll failed: %v", err)
+			}
+
+			if len(modules) != 1 {
+				t.Fatalf("expected 1 module, got %d", len(modules))
+			}
+
+			if !bytes.Equal(modules[0].Signature, sigBytes) {
+				t.Error("signature bytes don't match expected (whitespace not trimmed?)")
+			}
+		})
 	}
 }
 
