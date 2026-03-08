@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/andrew-d/anchor/internal/agent"
 	"github.com/andrew-d/anchor/internal/server"
+	"github.com/andrew-d/anchor/internal/signing"
 	"github.com/andrew-d/anchor/internal/version"
 )
 
@@ -20,6 +22,8 @@ const usage = `Usage: anchor <command> [flags]
 Commands:
   server    Start the anchor server
   agent     Start the anchor agent
+  keygen    Generate a signing keypair
+  sign      Sign module scripts
   version   Print the anchor version
 
 Run 'anchor <command> -help' for details on a specific command.
@@ -36,6 +40,10 @@ func main() {
 		os.Exit(runServer(os.Args[2:]))
 	case "agent":
 		os.Exit(runAgent(os.Args[2:]))
+	case "keygen":
+		os.Exit(runKeygen(os.Args[2:]))
+	case "sign":
+		os.Exit(runSign(os.Args[2:]))
 	case "version", "-version", "--version", "-v":
 		fmt.Println("anchor", version.Long())
 		os.Exit(0)
@@ -130,4 +138,85 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func runKeygen(args []string) int {
+	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
+	output := fs.String("o", "anchor", "output file base name (produces <name>.key and <name>.pub)")
+	if err := fs.Parse(args); err != nil {
+		slog.Error("failed to parse flags", "error", err)
+		return 1
+	}
+
+	priv, pub, err := signing.GenerateKey()
+	if err != nil {
+		slog.Error("generating keypair", "error", err)
+		return 1
+	}
+
+	keyPath := *output + ".key"
+	pubPath := *output + ".pub"
+
+	if err := os.WriteFile(keyPath, signing.MarshalPrivateKey(priv), 0600); err != nil {
+		slog.Error("writing private key", "path", keyPath, "error", err)
+		return 1
+	}
+	if err := os.WriteFile(pubPath, signing.MarshalPublicKey(pub), 0644); err != nil {
+		slog.Error("writing public key", "path", pubPath, "error", err)
+		return 1
+	}
+
+	slog.Info("generated signing keypair", "private_key", keyPath, "public_key", pubPath)
+	return 0
+}
+
+func runSign(args []string) int {
+	fs := flag.NewFlagSet("sign", flag.ContinueOnError)
+	keyFile := fs.String("k", "", "private key file (anchor PEM or OpenSSH format)")
+	if err := fs.Parse(args); err != nil {
+		slog.Error("failed to parse flags", "error", err)
+		return 1
+	}
+
+	if *keyFile == "" {
+		slog.Error("key file is required (-k flag)")
+		return 1
+	}
+
+	modules := fs.Args()
+	if len(modules) == 0 {
+		slog.Error("at least one module file is required")
+		return 1
+	}
+
+	keyData, err := os.ReadFile(*keyFile)
+	if err != nil {
+		slog.Error("reading key file", "path", *keyFile, "error", err)
+		return 1
+	}
+
+	privKey, err := signing.ParsePrivateKey(keyData)
+	if err != nil {
+		slog.Error("parsing private key", "path", *keyFile, "error", err)
+		return 1
+	}
+
+	for _, mod := range modules {
+		content, err := os.ReadFile(mod)
+		if err != nil {
+			slog.Error("reading module file", "path", mod, "error", err)
+			return 1
+		}
+
+		sig := signing.Sign(privKey, content)
+		sigPath := mod + ".sig"
+		if err := os.WriteFile(sigPath, []byte(hex.EncodeToString(sig)), 0644); err != nil {
+			slog.Error("writing signature file", "path", sigPath, "error", err)
+			return 1
+		}
+
+		slog.Info("signed module", "module", mod, "signature", sigPath)
+	}
+
+	return 0
 }
