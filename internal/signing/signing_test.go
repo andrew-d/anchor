@@ -3,7 +3,10 @@ package signing
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/pem"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -69,29 +72,35 @@ func TestSignAndVerify(t *testing.T) {
 		key       ed25519.PublicKey
 		msg       []byte
 		modifySig bool
+		wantValid bool
 	}{
 		{
 			name:      "valid signature",
 			key:       pub,
 			msg:       message,
 			modifySig: false,
+			wantValid: true,
 		},
 		{
 			name:      "tampered message",
 			key:       pub,
 			msg:       []byte("tampered message"),
 			modifySig: false,
+			wantValid: false,
 		},
 		{
 			name:      "tampered signature",
 			key:       pub,
 			msg:       message,
 			modifySig: true,
+			wantValid: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			sig := Sign(priv, message)
 
 			if tt.modifySig && len(sig) > 0 {
@@ -100,16 +109,16 @@ func TestSignAndVerify(t *testing.T) {
 
 			valid := Verify(tt.key, tt.msg, sig)
 
-			if tt.name == "valid signature" && !valid {
-				t.Error("expected signature to be valid")
-			} else if tt.name != "valid signature" && valid {
-				t.Error("expected signature to be invalid")
+			if valid != tt.wantValid {
+				t.Errorf("Verify() = %v, want %v", valid, tt.wantValid)
 			}
 		})
 	}
 
 	// Test wrong key
 	t.Run("wrong key", func(t *testing.T) {
+		t.Parallel()
+
 		_, wrongPub, err := GenerateKey()
 		if err != nil {
 			t.Fatalf("GenerateKey failed: %v", err)
@@ -191,28 +200,32 @@ func TestParsePrivateKeySSHFormat(t *testing.T) {
 func TestParsePrivateKeyRejectsNonEd25519(t *testing.T) {
 	t.Parallel()
 
-	// This is a minimal RSA SSH private key PEM block
-	// Generated with: ssh-keygen -t rsa -N "" -f test_rsa && cat test_rsa | base64 -w0
-	rsaSSHKey := []byte(`-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUtbm9uZS1ub25lAAAArQAAAJIAAAAL
-c3NoLXJzYS1jZXJ0AAAACXJzYS1zaGEyLTUxMgAAAyEA3bMVJZWKW3ql9EYH
-NhCPfHBkZc5W7L7hfX0R7KbcQbAAAABrAAAAC3NzaC1yc2EtY2VydAAAAAPE
-sQAAAyEA3bMVJZWKW3ql9EYHNhCPfHBkZc5W7L7hfX0R7KbcQb+AAAAAAAAA
-EwAAACsAAAAHc3NoLXJzYQAAACEAx/Vf8aKQpkXdVsXVGdVsXVGdVsXVGdVs
-XVQAAAAA=
------END OPENSSH PRIVATE KEY-----`)
+	// Generate a real RSA SSH private key at test time
+	rsaPriv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
 
-	_, err := ParsePrivateKey(rsaSSHKey)
+	// Marshal to OpenSSH format
+	rsaSSHKey, err := ssh.MarshalPrivateKey(rsaPriv, "")
+	if err != nil {
+		t.Fatalf("failed to marshal RSA key to SSH format: %v", err)
+	}
+
+	// Encode to PEM
+	rsaPEM := pem.EncodeToMemory(rsaSSHKey)
+
+	// Attempt to parse with ParsePrivateKey
+	_, err = ParsePrivateKey(rsaPEM)
 	if err == nil {
 		t.Error("expected error for RSA key, got nil")
 	}
 
-	if err != nil && err.Error() != "" {
-		// Check that the error mentions ed25519 or similar rejection
+	// Assert error mentions "only ed25519"
+	if err != nil {
 		errStr := err.Error()
-		if !contains(errStr, "ed25519") && !contains(errStr, "unsupported") {
-			t.Logf("got error: %v", err)
-			// Still accept this as a valid rejection even if wording differs
+		if !strings.Contains(errStr, "only ed25519") {
+			t.Errorf("expected error to mention 'only ed25519', got: %v", err)
 		}
 	}
 }
@@ -290,7 +303,7 @@ func TestParsePrivateKeyInvalidPEM(t *testing.T) {
 		t.Error("expected error for invalid PEM")
 	}
 
-	if !contains(err.Error(), "no PEM block") {
+	if !strings.Contains(err.Error(), "no PEM block") {
 		t.Errorf("expected 'no PEM block' error, got: %v", err)
 	}
 }
@@ -303,17 +316,7 @@ func TestParsePublicKeyInvalidData(t *testing.T) {
 		t.Error("expected error for invalid key data")
 	}
 
-	if !contains(err.Error(), "no ed25519 public key found") {
+	if !strings.Contains(err.Error(), "no ed25519 public key found") {
 		t.Errorf("expected 'no ed25519 public key found' error, got: %v", err)
 	}
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
