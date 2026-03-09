@@ -977,7 +977,7 @@ function Help() {
                     <dl class="help-dl">
                         <dt>Generating keys</dt>
                         <dd><code>anchor keygen -o mykey</code> creates <code>mykey.key</code> (private) and
-                        <code>mykey.pub</code> (public).</dd>
+                        <code>mykey.pub</code> (public) in Anchor PEM format.</dd>
                         <dt>Signing modules</dt>
                         <dd><code>anchor sign -k mykey.key module_script</code> creates a
                         <code>module_script.sig</code> sidecar file.</dd>
@@ -986,8 +986,26 @@ function Help() {
                         agent. Agents will reject modules with missing or invalid signatures.</dd>
                     </dl>
                     <p>
-                        Signature status is visible in the Modules page. If a <code>.sig</code> file is
-                        malformed, the associated module is treated as a load error.
+                        In addition to Anchor PEM keys, standard OpenSSH ed25519 keys are also accepted.
+                        You can sign with an SSH private key and verify with the corresponding public key.
+                        Only ed25519 keys are supported; other key types are rejected.
+                    </p>
+                    <p>
+                        The <code>--verify-key-url</code> flag accepts any URL that returns keys in SSH
+                        <code>authorized_keys</code> format. GitHub publishes users' public keys at
+                        <code>https://github.com/USERNAME.keys</code>, so you can use this to trust modules
+                        signed by a GitHub user's ed25519 key:
+                    </p>
+                    <p>
+                        <code>anchor agent --verify-key-url https://github.com/USERNAME.keys ...</code>
+                    </p>
+                    <p>
+                        URL-fetched keys are cached locally for offline fallback. Non-ed25519 keys in the
+                        response are silently ignored.
+                    </p>
+                    <p>
+                        If a <code>.sig</code> file is malformed, the associated module is treated as a
+                        load error.
                     </p>
                 </div>
             </div>
