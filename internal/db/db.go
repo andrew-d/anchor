@@ -42,6 +42,7 @@ type AgentModuleDetail struct {
 	ModuleName   string
 	Source       string // "direct" or "tag:<tagname>"
 	AssignmentID int64  // ID from module_assignments, for deletion
+	TagID        int64  // non-zero when source is a tag
 }
 
 // ModuleResult represents the outcome of a module execution.

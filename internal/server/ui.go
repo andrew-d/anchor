@@ -597,6 +597,7 @@ type AgentModuleDetailResponse struct {
 	Name         string `json:"name"`
 	Source       string `json:"source"`
 	AssignmentID int64  `json:"assignment_id"`
+	TagID        int64  `json:"tag_id,omitempty"`
 }
 
 // AgentEffectiveModulesResponse is the response for GET /api/agents/{id}/modules.
@@ -622,6 +623,7 @@ func (s *Server) handleGetAgentModules(w http.ResponseWriter, r *http.Request) {
 			Name:         md.ModuleName,
 			Source:       md.Source,
 			AssignmentID: md.AssignmentID,
+			TagID:        md.TagID,
 		})
 	}
 
@@ -629,6 +631,28 @@ func (s *Server) handleGetAgentModules(w http.ResponseWriter, r *http.Request) {
 		Modules: moduleResponses,
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode response", "error", err)
+	}
+}
+
+// --- Config API ---
+
+// ConfigResponse is the response for GET /api/config.
+type ConfigResponse struct {
+	PollIntervalSeconds   int    `json:"poll_interval_seconds"`
+	StaleThresholdSeconds int    `json:"stale_threshold_seconds"`
+	ModulesDir            string `json:"modules_dir"`
+}
+
+// handleGetConfig handles GET /api/config.
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	resp := ConfigResponse{
+		PollIntervalSeconds:   s.opts.PollInterval,
+		StaleThresholdSeconds: 2 * s.opts.PollInterval,
+		ModulesDir:            s.modulesDir,
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Error("failed to encode response", "error", err)

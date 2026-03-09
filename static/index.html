@@ -3,11 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>Anchor</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        // Apply theme before render to prevent flash
+        (function() {
+            var s = localStorage.getItem('anchor-theme');
+            var t = s || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body>
     <div id="app"></div>
+    <noscript>
+        <p style="padding: 2rem; text-align: center; font-family: system-ui, sans-serif;">
+            Anchor requires JavaScript to run.
+        </p>
+    </noscript>
 
     <script type="importmap">
     {

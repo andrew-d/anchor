@@ -467,7 +467,7 @@ func (s *SQLiteStore) GetAgentModuleDetails(ctx context.Context, agentID string)
 
 	// Query tag-based assignments
 	tagQuery := `
-SELECT ma.id, ma.module_name, t.name FROM module_assignments ma
+SELECT ma.id, ma.module_name, t.name, t.id FROM module_assignments ma
 JOIN tags t ON ma.tag_id = t.id
 JOIN agent_tags at ON at.tag_id = t.id
 WHERE at.agent_id = ?
@@ -494,7 +494,8 @@ ORDER BY ma.module_name
 	for tagRows.Next() {
 		var id int64
 		var moduleName, tagName string
-		if err := tagRows.Scan(&id, &moduleName, &tagName); err != nil {
+		var tagID int64
+		if err := tagRows.Scan(&id, &moduleName, &tagName, &tagID); err != nil {
 			return nil, err
 		}
 		// Only add if not already present from direct assignment
@@ -503,6 +504,7 @@ ORDER BY ma.module_name
 				ModuleName:   moduleName,
 				Source:       "tag:" + tagName,
 				AssignmentID: id,
+				TagID:        tagID,
 			})
 			seenTags[moduleName] = true
 		}
