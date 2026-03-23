@@ -1,6 +1,10 @@
 import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
+import {
+    formatTime, formatRelativeTime, formatDuration, formatTimeAgo,
+    createConnectionTracker,
+} from './util.js';
 
 const html = htm.bind(h);
 
@@ -21,33 +25,7 @@ function toggleTheme() {
 
 // === Connection Tracking ===
 
-const connection = {
-    status: 'connected',
-    lastSuccess: Date.now(),
-    failures: 0,
-    listeners: new Set(),
-
-    success() {
-        this.failures = 0;
-        this.lastSuccess = Date.now();
-        this._update();
-    },
-
-    failure() {
-        this.failures++;
-        this._update();
-    },
-
-    _update() {
-        const prev = this.status;
-        if (this.failures === 0) this.status = 'connected';
-        else if (this.failures < 3) this.status = 'degraded';
-        else this.status = 'disconnected';
-        if (this.status !== prev) {
-            this.listeners.forEach(fn => fn());
-        }
-    }
-};
+const connection = createConnectionTracker();
 
 function useConnectionStatus() {
     const [status, setStatus] = useState(connection.status);
@@ -125,41 +103,6 @@ async function deleteJSON(url) {
     const res = await apiRequest(url, { method: 'DELETE' });
     if (!res.ok) throw await parseError(res);
     return res.json();
-}
-
-// === Formatting ===
-
-function formatTime(unixSeconds) {
-    const d = new Date(unixSeconds * 1000);
-    return { local: d.toLocaleString(), utc: d.toUTCString() };
-}
-
-function formatRelativeTime(unixSeconds) {
-    const seconds = Math.floor(Date.now() / 1000 - unixSeconds);
-    if (seconds < 0) return 'just now';
-    if (seconds < 10) return 'just now';
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-}
-
-function formatDuration(seconds) {
-    if (seconds < 60) return `${seconds} seconds`;
-    if (seconds < 3600) {
-        const m = Math.floor(seconds / 60);
-        return m === 1 ? '1 minute' : `${m} minutes`;
-    }
-    const h = Math.floor(seconds / 3600);
-    return h === 1 ? '1 hour' : `${h} hours`;
-}
-
-function formatTimeAgo(timestampMs) {
-    const seconds = Math.floor((Date.now() - timestampMs) / 1000);
-    if (seconds < 10) return 'just now';
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    return `${Math.floor(seconds / 3600)}h ago`;
 }
 
 // === Shared Components ===
