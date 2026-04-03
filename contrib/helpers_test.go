@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -505,5 +506,66 @@ anchor_exit
 	code, _ = runHelper(t, dir, body)
 	if code != 0 {
 		t.Fatalf("second run: want exit 0, got %d", code)
+	}
+}
+
+func TestNoNamespacePollution(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	src := filepath.Join(dir, "src.txt")
+	os.WriteFile(src, []byte("data\n"), 0o644)
+
+	file := filepath.Join(dir, "lines.txt")
+	linkpath := filepath.Join(dir, "mylink")
+	subdir := filepath.Join(dir, "sub")
+
+	// Snapshot variable names before and after exercising every helper.
+	// Any new variable that doesn't start with _anchor_ / _ANCHOR_ is a leak.
+	body := fmt.Sprintf(`
+# Snapshot variable names before sourcing did anything.
+# (helpers.sh is already sourced by runHelper, so _ANCHOR_CHANGED exists,
+# but no helper has been called yet.)
+set | sed 's/=.*//' | sort > %[1]q
+
+anchor_file %[2]q %[3]q
+anchor_link /some/target %[4]q
+anchor_line %[5]q 'test line'
+anchor_dir %[6]q 0755
+anchor_chmod 0644 %[2]q
+anchor_absent %[3]q
+
+# Snapshot after.
+set | sed 's/=.*//' | sort > %[7]q
+
+# New variables = lines only in the "after" snapshot.
+comm -13 %[1]q %[7]q | while read -r name; do
+    case "$name" in
+        _ANCHOR_*|_anchor_*) ;;   # our namespace — ok
+        anchor_*) ;;              # our function names — ok
+        *) echo "LEAKED: $name" ;;
+    esac
+done
+anchor_exit
+`,
+		filepath.Join(dir, "vars_before.txt"),       // 1
+		src,                                          // 2
+		filepath.Join(dir, "dest.txt"),               // 3
+		linkpath,                                     // 4
+		file,                                         // 5
+		subdir,                                       // 6
+		filepath.Join(dir, "vars_after.txt"),         // 7
+	)
+
+	code, output := runHelper(t, dir, body)
+	if code != 80 {
+		t.Fatalf("want exit 80, got %d; output:\n%s", code, output)
+	}
+
+	// Fail on any LEAKED lines.
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "LEAKED:") {
+			t.Errorf("namespace pollution: %s", line)
+		}
 	}
 }
