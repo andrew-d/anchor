@@ -548,13 +548,13 @@ comm -13 %[1]q %[7]q | while read -r name; do
 done
 anchor_exit
 `,
-		filepath.Join(dir, "vars_before.txt"),       // 1
-		src,                                          // 2
-		filepath.Join(dir, "dest.txt"),               // 3
-		linkpath,                                     // 4
-		file,                                         // 5
-		subdir,                                       // 6
-		filepath.Join(dir, "vars_after.txt"),         // 7
+		filepath.Join(dir, "vars_before.txt"), // 1
+		src,                                   // 2
+		filepath.Join(dir, "dest.txt"),        // 3
+		linkpath,                              // 4
+		file,                                  // 5
+		subdir,                                // 6
+		filepath.Join(dir, "vars_after.txt"),  // 7
 	)
 
 	code, output := runHelper(t, dir, body)
